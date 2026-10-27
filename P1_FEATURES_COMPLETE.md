@@ -167,11 +167,12 @@ curl -X POST http://localhost:8000/api/automation/batch \
 2. 创建数据库和用户：
    ```sql
    CREATE DATABASE testmanage CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-   CREATE USER 'testmanage'@'localhost' IDENTIFIED BY 'TestManage2026Pwd';
+   CREATE USER 'testmanage'@'localhost' IDENTIFIED BY 'your_password_here';
    GRANT ALL PRIVILEGES ON testmanage.* TO 'testmanage'@'localhost';
    FLUSH PRIVILEGES;
    ```
-3. 启动后端：`cd backend && uvicorn app.main:app --reload --port 8000`
+3. 配置环境变量：复制 `backend/.env.example` 为 `backend/.env` 并修改数据库连接信息
+4. 启动后端：`cd backend && uvicorn app.main:app --reload --port 8000`
 4. 启动前端：`cd frontend && npm run dev`
 
 ### 功能测试清单

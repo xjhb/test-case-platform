@@ -79,14 +79,17 @@ npm run dev
 
 | 项 | 值 |
 |----|----|
-| 平台管理员 | admin / admin123 |
-| MySQL root | Root@2026! |
-| 应用数据库 | testmanage |
-| 应用数据库用户 | testmanage / TestManage2026Pwd |
+| 平台管理员 | admin / admin123 (首次登录后请修改密码) |
+| MySQL root | 请在 `.env` 文件中配置 |
+| 应用数据库 | 请在 `.env` 文件中配置 |
+| 应用数据库用户 | 请在 `.env` 文件中配置 |
 | MySQL 安装目录 | C:\mysql |
 | MySQL 配置文件 | C:\mysql\my.ini |
 
-> 安全提醒:首次登录后请尽快修改 admin 密码(可在 `C:\mysql\bin\mysql.exe` 中或后续在平台里增加改密功能)。
+> 安全提醒:
+> 1. 首次登录后请尽快修改 admin 密码
+> 2. 所有数据库凭据和密钥都应在 `backend/.env` 文件中配置,不要使用默认值
+> 3. 参考 `backend/.env.example` 创建你的 `.env` 文件
 
 ---
 
