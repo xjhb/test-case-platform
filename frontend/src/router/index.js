@@ -70,16 +70,10 @@ const routes = [
         meta: { title: '操作日志', requireAdmin: true },
       },
       {
-        path: 'settings/timeout',
-        name: 'settings-timeout',
-        component: () => import('../views/Settings.vue'),
-        meta: { title: '登录超时配置', requireAdmin: true },
-      },
-      {
-        path: 'settings/password',
-        name: 'settings-password',
-        component: () => import('../views/PasswordSettings.vue'),
-        meta: { title: '密码到期配置', requireAdmin: true },
+        path: 'settings/security',
+        name: 'settings-security',
+        component: () => import('../views/SecuritySettings.vue'),
+        meta: { title: '安全登录', requireAdmin: true },
       },
       {
         path: 'settings/stage',

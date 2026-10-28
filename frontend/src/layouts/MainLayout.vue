@@ -240,13 +240,9 @@ onBeforeUnmount(() => {
             <el-icon><Setting /></el-icon>
             <span>后台管理</span>
           </template>
-          <el-menu-item index="/settings/timeout">
-            <el-icon><Timer /></el-icon>
-            <span>登录超时配置</span>
-          </el-menu-item>
-          <el-menu-item index="/settings/password">
+          <el-menu-item index="/settings/security">
             <el-icon><Lock /></el-icon>
-            <span>密码到期配置</span>
+            <span>安全登录</span>
           </el-menu-item>
           <el-menu-item index="/settings/stage">
             <el-icon><Calendar /></el-icon>
