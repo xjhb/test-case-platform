@@ -217,8 +217,16 @@ const exportReport = async (row) => {
         'Authorization': `Bearer ${token}`,
       },
     })
-    if (!response.ok) throw new Error('导出失败')
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(`导出失败: ${response.status} - ${errorText}`)
+    }
     const blob = await response.blob()
+    console.log('Blob size:', blob.size, 'type:', blob.type)
+    if (blob.size === 0) {
+      ElMessage.error('导出的文件为空，请检查报告数据')
+      return
+    }
     const url = window.URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
@@ -230,7 +238,7 @@ const exportReport = async (row) => {
     ElMessage.success('导出成功')
   } catch (e) {
     console.error(e)
-    ElMessage.error('导出失败')
+    ElMessage.error(e.message || '导出失败')
   }
 }
 
