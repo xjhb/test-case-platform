@@ -6,16 +6,16 @@
     </div>
 
     <div class="filter-bar">
-      <el-select v-model="filters.project_id" placeholder="所属项目" clearable style="width: 180px">
+      <el-select v-model="filters.project_id" placeholder="所属项目" clearable style="width: 180px" @change="loadData">
         <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" />
       </el-select>
-      <el-select v-model="filters.status" placeholder="状态" clearable style="width: 120px">
+      <el-select v-model="filters.status" placeholder="状态" clearable style="width: 120px" @change="loadData">
         <el-option v-for="s in statusOptions" :key="s" :label="s" :value="s" />
       </el-select>
-      <el-select v-model="filters.severity" placeholder="严重程度" clearable style="width: 120px">
+      <el-select v-model="filters.severity" placeholder="严重程度" clearable style="width: 120px" @change="loadData">
         <el-option v-for="s in severityOptions" :key="s" :label="s" :value="s" />
       </el-select>
-      <el-select v-model="filters.priority" placeholder="优先级" clearable style="width: 100px">
+      <el-select v-model="filters.priority" placeholder="优先级" clearable style="width: 100px" @change="loadData">
         <el-option v-for="p in priorityOptions" :key="p" :label="p" :value="p" />
       </el-select>
       <el-input v-model="filters.keyword" placeholder="搜索标题/描述" clearable style="width: 200px" @keyup.enter="loadData" />
