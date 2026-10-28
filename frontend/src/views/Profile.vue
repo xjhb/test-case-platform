@@ -64,7 +64,7 @@ async function submitPassword() {
   pwdForm.confirm_password = ''
 }
 
-// 个人信息表单（预留）
+// 个人信息表单
 const userInfo = reactive({
   username: auth.username || '',
   display_name: auth.displayName || '',
@@ -72,9 +72,47 @@ const userInfo = reactive({
   phone: '',
 })
 
-function saveUserInfo() {
-  ElMessage.info('个人信息功能待实现')
+// 加载用户信息
+async function loadUserInfo() {
+  try {
+    const user = await authApi.me()
+    userInfo.username = user.username
+    userInfo.display_name = user.display_name || ''
+    userInfo.email = user.email || ''
+    userInfo.phone = user.phone || ''
+  } catch (e) {
+    console.error('加载用户信息失败:', e)
+  }
 }
+
+async function saveUserInfo() {
+  try {
+    await authApi.updateProfile({
+      display_name: userInfo.display_name,
+      email: userInfo.email,
+      phone: userInfo.phone,
+    })
+    ElMessage.success('个人信息已保存')
+    // 更新本地存储的显示名称
+    const user = JSON.parse(localStorage.getItem('user') || '{}')
+    user.display_name = userInfo.display_name
+    localStorage.setItem('user', JSON.stringify(user))
+    // 刷新页面以更新头部显示
+    setTimeout(() => location.reload(), 500)
+  } catch (e) {
+    ElMessage.error('保存失败')
+  }
+}
+
+// 组件挂载时加载数据
+onMounted(() => {
+  const data = JSON.parse(localStorage.getItem('login_info') || '{}')
+  if (data.must_change_password) {
+    isForcedChange.value = true
+  } else {
+    loadUserInfo()
+  }
+})
 </script>
 
 <template>

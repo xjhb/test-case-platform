@@ -30,6 +30,10 @@ class User(Base):
     password_updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())  # 密码最后更新时间
     # 是否必须修改密码(管理员重置后置1,改密成功后清零)
     must_change_password: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    
+    # 个人信息字段
+    email: Mapped[str] = mapped_column(String(128), default="")  # 邮箱
+    phone: Mapped[str] = mapped_column(String(32), default="")  # 手机号
 
 
 class Project(Base):

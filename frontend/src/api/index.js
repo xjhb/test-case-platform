@@ -44,6 +44,7 @@ export const authApi = {
   me: () => request.get('/auth/me'),
   register: (data) => request.post('/auth/register', data),
   changePassword: (data) => request.post('/auth/change-password', data),
+  updateProfile: (data) => request.put('/auth/profile', data),
 }
 
 // ---- 项目 ----

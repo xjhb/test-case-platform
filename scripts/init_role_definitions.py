@@ -1,10 +1,12 @@
 """初始化系统角色定义表，创建默认的四个角色"""
+import os
 import sys
 from pathlib import Path
 
 # 添加 backend 目录到 Python 路径
 backend_dir = Path(__file__).parent.parent / "backend"
 sys.path.insert(0, str(backend_dir))
+os.chdir(str(backend_dir))
 
 from sqlalchemy import select
 from app.database import SessionLocal, engine
@@ -13,7 +15,7 @@ from app.config import settings
 
 def init_roles():
     """创建 role_definitions 表并初始化默认角色"""
-    print(f"使用数据库配置: {settings.database_url.replace(settings.database_url.split('@')[0].split(':')[1], '***')}")
+    print(f"使用数据库: {settings.database_url.split('@')[1] if '@' in settings.database_url else settings.database_url}")
     
     # 创建表
     Base.metadata.create_all(bind=engine, tables=[RoleDefinition.__table__])

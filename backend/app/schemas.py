@@ -70,6 +70,13 @@ class UserUpdate(BaseModel):
     employment_status: str | None = None
 
 
+class ProfileUpdate(BaseModel):
+    """用户更新个人信息"""
+    display_name: str | None = None
+    email: str | None = None
+    phone: str | None = None
+
+
 class UserWithProjects(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int

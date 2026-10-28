@@ -8,7 +8,7 @@ from ..database import get_db
 from ..deps import get_current_user, require_admin
 from ..logger import log_op
 from ..models import SystemConfig, User
-from ..schemas import ChangePasswordRequest, LoginRequest, Token, UserCreate, UserOut
+from ..schemas import ChangePasswordRequest, LoginRequest, Token, UserCreate, UserOut, ProfileUpdate
 from ..security import create_access_token, get_session_timeout, hash_password, verify_password
 
 router = APIRouter(prefix="/api/auth", tags=["认证"])
@@ -83,6 +83,21 @@ def change_password(payload: ChangePasswordRequest, db: Session = Depends(get_db
     db.commit()
     log_op(db, current, "编辑", target="密码修改", detail=f"用户#{current.id}")
     return {"ok": True}
+
+
+@router.put("/profile")
+def update_profile(payload: ProfileUpdate, db: Session = Depends(get_db), current: User = Depends(get_current_user)):
+    """更新当前用户的个人信息"""
+    if payload.display_name is not None:
+        current.display_name = payload.display_name
+    if payload.email is not None:
+        current.email = payload.email
+    if payload.phone is not None:
+        current.phone = payload.phone
+    db.commit()
+    db.refresh(current)
+    log_op(db, current, "编辑", target="个人信息", detail=f"用户#{current.id}")
+    return {"ok": True, "user": UserOut.model_validate(current)}
 
 
 @router.post("/register", response_model=UserOut)
