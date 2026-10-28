@@ -7,7 +7,7 @@ from ..database import get_db
 from ..deps import get_current_user, require_admin, require_can_edit, require_can_manage, require_project_access
 from ..logger import log_op
 from ..models import (
-    CustomField, CustomFieldValue, ProjectRole, Tag, TestCase, TestCaseFolder,
+    CustomField, CustomFieldValue, ProjectRole, RoleDefinition, Tag, TestCase, TestCaseFolder,
     TestPlan, TestRound, TestRun, User, testcase_tags, user_projects,
 )
 from ..schemas import (
@@ -15,11 +15,108 @@ from ..schemas import (
     CustomFieldCreate, CustomFieldOut, CustomFieldValueOut, CustomFieldValueSet,
     FolderCreate, FolderOut, FolderUpdate,
     ProjectRoleAssign, ProjectRoleOut,
+    RoleDefinitionCreate, RoleDefinitionOut, RoleDefinitionUpdate,
     TagAssign, TagCreate, TagOut,
     TestRoundCreate, TestRoundOut,
 )
 
 router = APIRouter(prefix="/api/p2", tags=["P2功能"], dependencies=[Depends(get_current_user)])
+
+
+# ===================== 系统角色定义 =====================
+@router.get("/role-definitions", response_model=list[RoleDefinitionOut])
+def list_role_definitions(
+    db: Session = Depends(get_db), current: User = Depends(get_current_user)
+):
+    """获取所有系统角色定义（所有用户可查看）"""
+    return list(db.execute(
+        select(RoleDefinition).order_by(RoleDefinition.sort_order, RoleDefinition.id)
+    ).scalars())
+
+
+@router.post("/role-definitions", response_model=RoleDefinitionOut)
+def create_role_definition(
+    payload: RoleDefinitionCreate, db: Session = Depends(get_db), current: User = Depends(get_current_user)
+):
+    """创建新的角色定义（仅 admin）"""
+    if current.role != "admin":
+        raise HTTPException(status_code=403, detail="只有管理员可以创建角色")
+    
+    # 检查角色代码是否已存在
+    existing = db.execute(
+        select(RoleDefinition).where(RoleDefinition.role_code == payload.role_code)
+    ).scalar_one_or_none()
+    if existing:
+        raise HTTPException(status_code=400, detail=f"角色代码 {payload.role_code} 已存在")
+    
+    role_def = RoleDefinition(
+        role_code=payload.role_code,
+        role_name=payload.role_name,
+        description=payload.description,
+        sort_order=payload.sort_order,
+        is_system=False,
+    )
+    db.add(role_def)
+    db.commit()
+    db.refresh(role_def)
+    log_op(db, current, "创建", target=f"角色定义#{role_def.id}", detail=payload.role_code)
+    return role_def
+
+
+@router.put("/role-definitions/{role_id}", response_model=RoleDefinitionOut)
+def update_role_definition(
+    role_id: int, payload: RoleDefinitionUpdate, db: Session = Depends(get_db), current: User = Depends(get_current_user)
+):
+    """更新角色定义（仅 admin，系统内置角色不可修改）"""
+    if current.role != "admin":
+        raise HTTPException(status_code=403, detail="只有管理员可以修改角色")
+    
+    role_def = db.get(RoleDefinition, role_id)
+    if not role_def:
+        raise HTTPException(status_code=404, detail="角色不存在")
+    
+    if role_def.is_system:
+        raise HTTPException(status_code=400, detail="系统内置角色不可修改")
+    
+    if payload.role_name is not None:
+        role_def.role_name = payload.role_name
+    if payload.description is not None:
+        role_def.description = payload.description
+    if payload.sort_order is not None:
+        role_def.sort_order = payload.sort_order
+    
+    db.commit()
+    db.refresh(role_def)
+    log_op(db, current, "更新", target=f"角色定义#{role_id}", detail=role_def.role_code)
+    return role_def
+
+
+@router.delete("/role-definitions/{role_id}")
+def delete_role_definition(
+    role_id: int, db: Session = Depends(get_db), current: User = Depends(get_current_user)
+):
+    """删除角色定义（仅 admin，系统内置角色不可删除，已有项目使用的角色不可删除）"""
+    if current.role != "admin":
+        raise HTTPException(status_code=403, detail="只有管理员可以删除角色")
+    
+    role_def = db.get(RoleDefinition, role_id)
+    if not role_def:
+        raise HTTPException(status_code=404, detail="角色不存在")
+    
+    if role_def.is_system:
+        raise HTTPException(status_code=400, detail="系统内置角色不可删除")
+    
+    # 检查是否有项目正在使用此角色
+    usage_count = db.execute(
+        select(func.count(ProjectRole.id)).where(ProjectRole.role == role_def.role_code)
+    ).scalar() or 0
+    if usage_count > 0:
+        raise HTTPException(status_code=400, detail=f"该角色正在被 {usage_count} 个项目使用，无法删除")
+    
+    db.delete(role_def)
+    db.commit()
+    log_op(db, current, "删除", target=f"角色定义#{role_id}", detail=role_def.role_code)
+    return {"ok": True}
 
 
 # ===================== RBAC 项目角色 =====================
@@ -45,8 +142,14 @@ def assign_project_role(
     pid: int, payload: ProjectRoleAssign, db: Session = Depends(get_db), current: User = Depends(get_current_user)
 ):
     require_can_manage(pid, db, current)
-    if payload.role not in ("manager", "test_lead", "tester", "viewer"):
-        raise HTTPException(status_code=400, detail="角色只能是 manager/test_lead/tester/viewer")
+    
+    # 验证角色代码是否在系统角色定义中存在
+    role_def = db.execute(
+        select(RoleDefinition).where(RoleDefinition.role_code == payload.role)
+    ).scalar_one_or_none()
+    if not role_def:
+        raise HTTPException(status_code=400, detail=f"角色 {payload.role} 不存在，请先在系统角色定义中创建")
+    
     existing = db.execute(
         select(ProjectRole).where(ProjectRole.user_id == payload.user_id, ProjectRole.project_id == pid)
     ).scalar_one_or_none()

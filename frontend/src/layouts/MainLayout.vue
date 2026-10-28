@@ -221,7 +221,8 @@ onBeforeUnmount(() => {
         <router-view />
       </el-main>
     </el-container>
-  </template>
+  </el-container>
+</template>
 
 <style scoped>
 .layout {

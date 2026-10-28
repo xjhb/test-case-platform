@@ -78,12 +78,32 @@ const roleLoading = ref(false)
 const assignRoleVisible = ref(false)
 const assignRoleForm = reactive({ user_id: '', role: 'tester' })
 const userList = ref([])
-const ROLE_OPTIONS = [
+const ROLE_OPTIONS = ref([
   { label: '管理员(manager)', value: 'manager' },
   { label: '测试负责人(test_lead)', value: 'test_lead' },
   { label: '测试员(tester)', value: 'tester' },
   { label: '只读(viewer)', value: 'viewer' },
-]
+])
+
+// 加载角色定义
+async function loadRoleDefinitions() {
+  try {
+    const roles = await p2Api.listRoleDefinitions()
+    ROLE_OPTIONS.value = roles.map(r => ({
+      label: `${r.role_name}(${r.role_code})`,
+      value: r.role_code
+    }))
+  } catch (e) {
+    console.error('加载角色定义失败:', e)
+    // 失败时使用默认值
+    ROLE_OPTIONS.value = [
+      { label: '管理员(manager)', value: 'manager' },
+      { label: '测试负责人(test_lead)', value: 'test_lead' },
+      { label: '测试员(tester)', value: 'tester' },
+      { label: '只读(viewer)', value: 'viewer' },
+    ]
+  }
+}
 
 async function openRoleDialog(row) {
   roleProject.value = row

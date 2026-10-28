@@ -443,7 +443,7 @@ class CoverageMatrixItem(BaseModel):
 # ===================== P2: RBAC 项目角色 =====================
 class ProjectRoleAssign(BaseModel):
     user_id: int
-    role: str = "tester"  # manager / test_lead / tester / viewer
+    role: str = "tester"  # 角色代码，必须是系统中存在的角色
 
 
 class ProjectRoleOut(BaseModel):
@@ -452,6 +452,32 @@ class ProjectRoleOut(BaseModel):
     user_id: int
     username: str = ""
     display_name: str = ""
+
+
+# ===================== P2: 系统角色定义 =====================
+class RoleDefinitionCreate(BaseModel):
+    role_code: str = Field(min_length=1, max_length=32)
+    role_name: str = Field(min_length=1, max_length=64)
+    description: str = ""
+    sort_order: int = 0
+
+
+class RoleDefinitionUpdate(BaseModel):
+    role_name: str | None = None
+    description: str | None = None
+    sort_order: int | None = None
+
+
+class RoleDefinitionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    role_code: str
+    role_name: str
+    description: str
+    is_system: bool
+    sort_order: int
+    created_at: datetime
+    updated_at: datetime
     project_id: int
     role: str
 

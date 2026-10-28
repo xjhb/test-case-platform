@@ -271,6 +271,21 @@ class ProjectRole(Base):
     role: Mapped[str] = mapped_column(String(16), default="tester")  # manager / test_lead / tester / viewer
 
 
+# ===================== P2: 系统角色定义 =====================
+class RoleDefinition(Base):
+    """系统级角色定义，由 admin 创建/管理，供所有项目使用"""
+    __tablename__ = "role_definitions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    role_code: Mapped[str] = mapped_column(String(32), unique=True, index=True)  # 角色代码，如 manager/test_lead
+    role_name: Mapped[str] = mapped_column(String(64))  # 角色名称，如 "测试经理"
+    description: Mapped[str] = mapped_column(Text, default="")  # 角色描述
+    is_system: Mapped[bool] = mapped_column(Boolean, default=False)  # 是否系统内置角色（不可删除）
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)  # 排序
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
 # ===================== P2: 用例目录树 =====================
 class TestCaseFolder(Base):
     __tablename__ = "testcase_folders"
