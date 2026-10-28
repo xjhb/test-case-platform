@@ -293,10 +293,16 @@ async function load() {
     // 加载新增的趋势数据
     if (filters.project_id) {
       try {
+        const convergenceParams = { project_id: filters.project_id }
+        if (filters.plan_id) convergenceParams.plan_id = filters.plan_id
+        
+        const workloadParams = { project_id: filters.project_id, days: 30 }
+        if (filters.plan_id) workloadParams.plan_id = filters.plan_id
+        
         const [trends, convergence, workload] = await Promise.all([
           statsApi.passRateTrends({ project_id: filters.project_id, stage: filters.stage || 'SIT' }),
-          statsApi.defectConvergence({ project_id: filters.project_id, plan_id: filters.plan_id }),
-          statsApi.workloadDistribution({ project_id: filters.project_id, plan_id: filters.plan_id, days: 30 }),
+          statsApi.defectConvergence(convergenceParams),
+          statsApi.workloadDistribution(workloadParams),
         ])
         passRateTrends.value = trends.trends || []
         defectConvergence.value = convergence.convergence || []
