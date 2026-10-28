@@ -113,7 +113,7 @@ npm run dev
 
 ## 添加团队成员
 
-当前 MVP 的成员管理仅开放了接口,管理员可在 Swagger 文档页(`http://<服务器IP>:8000/docs`)调用:
+当前 MVP 的成员管理仅开放了接口,管理员可在 Swagger 文档页(http://<服务器IP>:8000/docs)调用:
 ```
 POST /api/auth/register
 Body: { "username": "zhangsan", "password": "xxxxxx", "display_name": "张三" }
