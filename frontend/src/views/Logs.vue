@@ -42,12 +42,6 @@ function search() {
   load()
 }
 
-function resetQuery() {
-  query.action = ''
-  query.username = ''
-  search()
-}
-
 function pageChange(p) {
   query.page = p
   load()
@@ -72,7 +66,6 @@ onMounted(async () => {
       </el-select>
       <el-input v-model="query.username" placeholder="用户名" clearable style="width: 160px" @keyup.enter="search" />
       <el-button type="primary" @click="search">查询</el-button>
-      <el-button @click="resetQuery">重置</el-button>
       <el-button @click="load">刷新</el-button>
     </div>
 
