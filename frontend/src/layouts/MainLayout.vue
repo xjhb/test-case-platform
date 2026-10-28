@@ -213,6 +213,10 @@ onBeforeUnmount(() => {
           <el-icon><Connection /></el-icon>
           <span>自动化集成</span>
         </el-menu-item>
+        <el-menu-item v-if="auth.role === 'admin'" index="/integrations">
+          <el-icon><Link /></el-icon>
+          <span>外部工具集成</span>
+        </el-menu-item>
         <el-sub-menu v-if="auth.role === 'admin'" index="outsourcing">
           <template #title>
             <el-icon><UserFilled /></el-icon>

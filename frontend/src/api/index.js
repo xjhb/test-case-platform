@@ -250,6 +250,31 @@ export const p2Api = {
   batchExecute: (data) => request.post('/p2/batch-execute', data),
 }
 
+// ---- 外部集成 ----
+export const integrationApi = {
+  // Webhook
+  receiveWebhook: (data) => request.post('/integrations/webhook', data),
+  
+  // 缺陷同步
+  syncDefect: (data) => request.post('/integrations/defect/sync', data),
+  pushDefect: (defectId, targetSystem) => request.post(`/integrations/defect/push?target_system=${targetSystem}`, null),
+  
+  // 通知
+  sendNotification: (data) => request.post('/integrations/notify', data),
+  
+  // 自动化测试
+  reportAutomationResult: (data) => request.post('/integrations/automation/result', data),
+  
+  // CI/CD
+  triggerPipeline: (data) => request.post('/integrations/cicd/trigger', data),
+  
+  // 配置管理
+  listConfigs: () => request.get('/integrations/config/list'),
+  createConfig: (data) => request.post('/integrations/config', data),
+  updateConfig: (configId, data) => request.put(`/integrations/config/${configId}`, data),
+  deleteConfig: (configId) => request.delete(`/integrations/config/${configId}`),
+}
+
 // ---- 测试用例导出(浏览器直接下载,需手动带 token) ----
 export const testcaseExportUrl = (projectId) => `/api/testcases/export?project_id=${projectId}`
 

@@ -106,6 +106,12 @@ const routes = [
         meta: { title: '自动化集成' },
       },
       {
+        path: 'integrations',
+        name: 'integrations',
+        component: () => import('../views/Integrations.vue'),
+        meta: { title: '外部工具集成', requireAdmin: true },
+      },
+      {
         path: 'notifications',
         name: 'notifications',
         component: () => import('../views/Notifications.vue'),
