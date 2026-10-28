@@ -53,6 +53,8 @@ class UserOut(BaseModel):
     system_name: str = ""
     terminal_no: str = ""
     employment_status: str = "在职"
+    email: str = ""
+    phone: str = ""
 
 
 class UserUpdate(BaseModel):
@@ -485,8 +487,6 @@ class RoleDefinitionOut(BaseModel):
     sort_order: int
     created_at: datetime
     updated_at: datetime
-    project_id: int
-    role: str
 
 
 # ===================== P2: 用例目录树 =====================
