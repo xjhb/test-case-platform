@@ -209,10 +209,29 @@ const viewReport = async (row) => {
   viewDialogVisible.value = true
 }
 
-const exportReport = (row) => {
+const exportReport = async (row) => {
   const token = localStorage.getItem('token')
-  const url = `/api/reports/${row.id}/export?token=${token}`
-  window.open(url, '_blank')
+  try {
+    const response = await fetch(`/api/reports/${row.id}/export`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+    })
+    if (!response.ok) throw new Error('导出失败')
+    const blob = await response.blob()
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `report_${row.id}.xlsx`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    window.URL.revokeObjectURL(url)
+    ElMessage.success('导出成功')
+  } catch (e) {
+    console.error(e)
+    ElMessage.error('导出失败')
+  }
 }
 
 const handleDelete = async (row) => {
