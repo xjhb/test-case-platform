@@ -1,11 +1,22 @@
 <script setup>
-import { ref, reactive } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { authApi } from '../api'
 import { useAuthStore } from '../stores/auth'
 
+const router = useRouter()
 const auth = useAuthStore()
 const activeTab = ref('password')
+const isForcedChange = ref(false)
+
+// 检查是否处于强制改密状态
+onMounted(() => {
+  const data = JSON.parse(localStorage.getItem('login_info') || '{}')
+  if (data.must_change_password) {
+    isForcedChange.value = true
+  }
+})
 
 // 修改密码表单
 const pwdFormRef = ref()
@@ -32,6 +43,22 @@ async function submitPassword() {
     new_password: pwdForm.new_password,
   })
   ElMessage.success('密码已修改')
+  
+  // 如果是强制改密，清除标记并刷新页面
+  if (isForcedChange.value) {
+    try {
+      const info = JSON.parse(localStorage.getItem('login_info') || '{}')
+      info.must_change_password = false
+      info.password_expired = false
+      localStorage.setItem('login_info', JSON.stringify(info))
+    } catch (e) {
+      localStorage.removeItem('login_info')
+    }
+    ElMessage.success('密码修改成功，系统将重新加载')
+    setTimeout(() => location.reload(), 1000)
+    return
+  }
+  
   pwdForm.old_password = ''
   pwdForm.new_password = ''
   pwdForm.confirm_password = ''
@@ -53,9 +80,18 @@ function saveUserInfo() {
 <template>
   <div>
     <el-card shadow="hover">
-      <el-tabs v-model="activeTab">
+      <el-tabs v-model="activeTab" :closable="false">
         <!-- 修改密码页签 -->
         <el-tab-pane label="修改密码" name="password">
+          <el-alert
+            v-if="isForcedChange"
+            type="error"
+            :closable="false"
+            show-icon
+            title="必须修改密码"
+            description="您的密码已被管理员重置，修改密码后才能继续使用系统。"
+            style="margin-bottom: 20px"
+          />
           <el-form
             ref="pwdFormRef"
             :model="pwdForm"
@@ -78,8 +114,8 @@ function saveUserInfo() {
           </el-form>
         </el-tab-pane>
 
-        <!-- 个人信息页签（预留） -->
-        <el-tab-pane label="个人信息" name="info">
+        <!-- 个人信息页签（预留，强制改密时隐藏） -->
+        <el-tab-pane v-if="!isForcedChange" label="个人信息" name="info">
           <el-form :model="userInfo" label-width="100px" style="max-width: 500px; margin-top: 20px">
             <el-form-item label="用户名">
               <el-input v-model="userInfo.username" disabled />

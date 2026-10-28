@@ -3,7 +3,7 @@ import { ref, reactive, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useAuthStore } from '../stores/auth'
-import { systemApi, authApi, notificationApi } from '../api'
+import { systemApi, notificationApi } from '../api'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -45,71 +45,6 @@ function handleUserMenu(command) {
   }
 }
 
-// ---- 修改密码 ----
-const pwdVisible = ref(false)
-const forcedPwd = ref(false)   // true = 管理员重置过密码,必须改密,弹窗不可关闭
-const pwdFormRef = ref()
-const pwdForm = reactive({ old_password: '', new_password: '', confirm_password: '' })
-const pwdRules = {
-  old_password: [{ required: true, message: '请输入原密码', trigger: 'blur' }],
-  new_password: [{ required: true, min: 6, message: '至少6位', trigger: 'blur' }],
-  confirm_password: [
-    { required: true, message: '请确认新密码', trigger: 'blur' },
-    {
-      validator: (rule, value, callback) => {
-        if (value !== pwdForm.new_password) callback(new Error('两次输入不一致'))
-        else callback()
-      },
-      trigger: 'blur',
-    },
-  ],
-}
-
-function openChangePassword() {
-  forcedPwd.value = false
-  pwdForm.old_password = ''
-  pwdForm.new_password = ''
-  pwdForm.confirm_password = ''
-  pwdVisible.value = true
-}
-
-// 管理员重置密码后的强制改密:独立一个不可关闭的对话框
-function openForcedPassword() {
-  pwdForm.old_password = ''
-  pwdForm.new_password = ''
-  pwdForm.confirm_password = ''
-  forcedPwd.value = true
-  pwdVisible.value = true
-}
-
-// 清掉本地的登录提示状态,避免刷新后重复强制改密
-function clearForcedFlag() {
-  try {
-    const info = JSON.parse(localStorage.getItem('login_info') || '{}')
-    info.must_change_password = false
-    info.password_expired = false
-    localStorage.setItem('login_info', JSON.stringify(info))
-  } catch (e) {
-    localStorage.removeItem('login_info')
-  }
-}
-
-async function submitPassword() {
-  await pwdFormRef.value.validate()
-  await authApi.changePassword({
-    old_password: pwdForm.old_password,
-    new_password: pwdForm.new_password,
-  })
-  ElMessage.success('密码已修改')
-  if (forcedPwd.value) {
-    clearForcedFlag()
-    forcedPwd.value = false
-    // 重新加载,让各页面用新状态重新拉数据
-    setTimeout(() => location.reload(), 600)
-  }
-  pwdVisible.value = false
-}
-
 // ---- 登录后密码状态提醒 ----
 function checkPasswordExpiring() {
   const data = JSON.parse(localStorage.getItem('login_info') || '{}')
@@ -125,7 +60,7 @@ function checkPasswordExpiring() {
         closeOnClickModal: false,
         closeOnPressEscape: false,
       }
-    ).then(() => openForcedPassword())
+    ).then(() => router.push({ name: 'profile' }))
     return
   }
   if (data.password_expired) {
@@ -133,7 +68,7 @@ function checkPasswordExpiring() {
       confirmButtonText: '去修改',
       type: 'error',
       showClose: false,
-    }).then(() => openChangePassword())
+    }).then(() => router.push({ name: 'profile' }))
   } else if (data.password_expiring) {
     ElMessageBox.alert(
       `您的密码将在 ${data.password_days_left} 天后到期,请尽快修改密码`,
@@ -286,45 +221,6 @@ onBeforeUnmount(() => {
         <router-view />
       </el-main>
     </el-container>
-
-    </el-container>
-
-    <!-- 修改密码对话框(放在container外) -->
-    <!-- forcedPwd 时:不可关闭、无取消按钮,必须先改密 -->
-    <el-dialog
-      v-model="pwdVisible"
-      :title="forcedPwd ? '必须修改密码' : '修改密码'"
-      width="420px"
-      :close-on-click-modal="false"
-      :close-on-press-escape="!forcedPwd"
-      :show-close="!forcedPwd"
-    >
-      <el-alert
-        v-if="forcedPwd"
-        type="error"
-        :closable="false"
-        show-icon
-        title="密码已被管理员重置"
-        description="修改密码成功前,系统其他功能不可使用。"
-        style="margin-bottom: 16px"
-      />
-      <el-form ref="pwdFormRef" :model="pwdForm" :rules="pwdRules" label-width="90px">
-        <el-form-item label="原密码" prop="old_password">
-          <el-input v-model="pwdForm.old_password" type="password" show-password placeholder="请输入管理员提供的临时密码" />
-        </el-form-item>
-        <el-form-item label="新密码" prop="new_password">
-          <el-input v-model="pwdForm.new_password" type="password" show-password placeholder="至少6位" />
-        </el-form-item>
-        <el-form-item label="确认密码" prop="confirm_password">
-          <el-input v-model="pwdForm.confirm_password" type="password" show-password />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button v-if="!forcedPwd" @click="pwdVisible = false">取消</el-button>
-        <el-button v-else @click="logout">退出登录</el-button>
-        <el-button type="primary" @click="submitPassword">确认修改</el-button>
-      </template>
-    </el-dialog>
   </template>
 
 <style scoped>
