@@ -37,6 +37,14 @@ function logout() {
   router.push({ name: 'login' })
 }
 
+function handleUserMenu(command) {
+  if (command === 'password') {
+    openChangePassword()
+  } else if (command === 'logout') {
+    logout()
+  }
+}
+
 // ---- 修改密码 ----
 const pwdVisible = ref(false)
 const forcedPwd = ref(false)   // true = 管理员重置过密码,必须改密,弹窗不可关闭
@@ -260,10 +268,18 @@ onBeforeUnmount(() => {
               <el-icon><Bell /></el-icon>
             </el-button>
           </el-badge>
-          <el-tag v-if="auth.role === 'admin'" size="small" type="warning">管理员</el-tag>
-          <span class="name">{{ auth.displayName }}</span>
-          <el-button text type="warning" @click="openChangePassword">修改密码</el-button>
-          <el-button text type="primary" @click="logout">退出</el-button>
+          <el-dropdown @command="handleUserMenu">
+            <span class="user-dropdown">
+              <span class="name">{{ auth.displayName }}</span>
+              <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+            </span>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="password">个人账户设置</el-dropdown-item>
+                <el-dropdown-item divided command="logout">退出登录</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </div>
       </el-header>
       <el-main class="main">
@@ -343,6 +359,17 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+.user-dropdown {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+}
+.user-dropdown:hover {
+  background-color: #f5f7fa;
 }
 .header .name {
   font-size: 14px;
