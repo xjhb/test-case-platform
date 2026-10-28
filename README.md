@@ -55,10 +55,10 @@ D:\testmanage\
 双击 `D:\testmanage\start-backend.bat`,或在终端执行:
 ```
 cd /d D:\testmanage\backend
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
-后端地址:http://127.0.0.1:8000
-接口文档(Swagger):http://127.0.0.1:8000/docs
+后端地址:`http://<服务器IP>:8000`
+接口文档(Swagger):`http://<服务器IP>:8000/docs`
 
 ### 2. 启动前端
 双击 `D:\testmanage\start-frontend.bat`,或:
@@ -66,10 +66,10 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 cd /d D:\testmanage\frontend
 npm run dev
 ```
-前端地址:http://127.0.0.1:5173
+前端地址:`http://<服务器IP>:5173`
 
 ### 3. 登录
-浏览器打开 http://127.0.0.1:5173 ,使用默认账号:
+浏览器打开 `http://<服务器IP>:5173`,使用默认账号:
 - 用户名:`admin`
 - 密码:`admin123`
 
@@ -113,7 +113,7 @@ npm run dev
 
 ## 添加团队成员
 
-当前 MVP 的成员管理仅开放了接口,管理员可在 Swagger 文档页(http://127.0.0.1:8000/docs)调用:
+当前 MVP 的成员管理仅开放了接口,管理员可在 Swagger 文档页(`http://<服务器IP>:8000/docs`)调用:
 ```
 POST /api/auth/register
 Body: { "username": "zhangsan", "password": "xxxxxx", "display_name": "张三" }

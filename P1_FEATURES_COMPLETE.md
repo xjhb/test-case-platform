@@ -62,7 +62,7 @@
 
 **API 使用示例：**
 ```bash
-curl -X POST http://localhost:8000/api/automation/batch \
+curl -X POST http://<your-server>:8000/api/automation/batch \
   -H "Authorization: Bearer YOUR_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{

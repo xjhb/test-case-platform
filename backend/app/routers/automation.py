@@ -149,7 +149,7 @@ def automation_guide():
             ],
         },
         "example": {
-            "curl": """curl -X POST http://localhost:8000/api/automation/batch \\
+            "curl": """curl -X POST http://<your-server>:8000/api/automation/batch \\
   -H "Authorization: Bearer YOUR_TOKEN" \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -191,7 +191,7 @@ data = {
 }
 
 response = requests.post(
-    "http://localhost:8000/api/automation/batch",
+    "http://<your-server>:8000/api/automation/batch",
     headers=headers,
     json=data
 )
