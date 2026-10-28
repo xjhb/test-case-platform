@@ -70,6 +70,12 @@ const routes = [
         meta: { title: '操作日志', requireAdmin: true },
       },
       {
+        path: 'profile',
+        name: 'profile',
+        component: () => import('../views/Profile.vue'),
+        meta: { title: '个人账户设置' },
+      },
+      {
         path: 'settings/security',
         name: 'settings-security',
         component: () => import('../views/SecuritySettings.vue'),

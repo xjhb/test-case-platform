@@ -39,7 +39,7 @@ function logout() {
 
 function handleUserMenu(command) {
   if (command === 'password') {
-    openChangePassword()
+    router.push({ name: 'profile' })
   } else if (command === 'logout') {
     logout()
   }
