@@ -1,5 +1,8 @@
 # Nacos 配置中心部署指南
 
+> **当前使用版本: Nacos 2.4.3**
+> 升级 Nacos 时请注意版本兼容性，参考 [Nacos 升级指南](https://nacos.io/docs/latest/upgrading/)
+
 ## 概述
 
 测管平台已集成 Nacos 配置中心，支持将数据库连接、JWT密钥等敏感配置集中管理。
