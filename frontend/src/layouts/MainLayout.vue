@@ -231,15 +231,15 @@ onBeforeUnmount(() => {
             <span>团队管理</span>
           </el-menu-item>
         </el-sub-menu>
-        <el-menu-item v-if="auth.role === 'admin'" index="/logs">
-          <el-icon><List /></el-icon>
-          <span>操作日志</span>
-        </el-menu-item>
         <el-sub-menu v-if="auth.role === 'admin'" index="settings">
           <template #title>
             <el-icon><Setting /></el-icon>
             <span>后台管理</span>
           </template>
+          <el-menu-item index="/logs">
+            <el-icon><List /></el-icon>
+            <span>操作日志</span>
+          </el-menu-item>
           <el-menu-item index="/settings/security">
             <el-icon><Lock /></el-icon>
             <span>安全登录</span>
