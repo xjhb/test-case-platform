@@ -205,6 +205,11 @@ class StageTimeUpdate(BaseModel):
     pre_end: str | None = None
 
 
+class StageAdvance(BaseModel):
+    """阶段推进请求，支持跳转到任意阶段"""
+    target_stage: str | None = None  # 目标阶段，不传则推进到下一阶段
+
+
 class TestPlanOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int

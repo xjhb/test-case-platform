@@ -27,6 +27,7 @@ const advanceVisible = ref(false)
 const advanceLoading = ref(false)
 const advancePlan = ref(null)
 const advanceProgress = ref(null)
+const targetStage = ref('')
 
 const query = reactive({ project_id: '' })
 
@@ -74,6 +75,7 @@ async function openAdvance(row) {
   advancePlan.value = row
   advanceVisible.value = true
   advanceLoading.value = true
+  targetStage.value = ''
   try {
     advanceProgress.value = await planApi.progress(row.id)
   } finally {
@@ -83,19 +85,25 @@ async function openAdvance(row) {
 
 async function doAdvance() {
   const p = advanceProgress.value
-  if (!p.can_advance) {
-    ElMessage.error(`当前阶段(${p.current_stage})还有用例未全部通过,无法推进`)
+  const nextStage = targetStage.value || getNextStage(p.current_stage)
+  if (!nextStage) {
+    ElMessage.error('没有可推进的下一阶段')
     return
   }
   await ElMessageBox.confirm(
-    `确认将计划「${advancePlan.value.version}」从 ${p.current_stage} 推进到下一阶段?`,
+    `确认将计划「${advancePlan.value.version}」从 ${stageLabel(p.current_stage)} 推进到 ${stageLabel(nextStage)}?`,
     '阶段推进',
     { type: 'warning' }
   )
-  await planApi.advance(advancePlan.value.id)
-  ElMessage.success('已推进到下一阶段')
+  await planApi.advance(advancePlan.value.id, nextStage)
+  ElMessage.success(`已推进到${stageLabel(nextStage)}阶段`)
   advanceVisible.value = false
   load()
+}
+
+function getNextStage(current) {
+  const idx = STAGES.indexOf(current)
+  return idx < STAGES.length - 1 ? STAGES[idx + 1] : null
 }
 
 async function remove(row) {
@@ -402,14 +410,27 @@ async function submitStageTimes() {
         <el-alert
           v-if="advanceProgress"
           :title="`当前阶段:${stageLabel(advanceProgress.current_stage)} | 计划状态:${advanceProgress.status}`"
-          :type="advanceProgress.can_advance ? 'success' : 'warning'"
+          type="info"
           :closable="false"
           show-icon
           style="margin-bottom: 16px"
         >
-          <span v-if="advanceProgress.can_advance">当前阶段所有用例已通过,可以推进到下一阶段</span>
-          <span v-else>当前阶段仍有用例未通过,需全部通过后才能推进</span>
+          <span>可灵活推进到任意后续阶段，无需当前阶段 100% 通过</span>
         </el-alert>
+
+        <el-form v-if="advanceProgress" label-width="80px" style="margin-bottom: 16px">
+          <el-form-item label="目标阶段">
+            <el-select v-model="targetStage" placeholder="不选则推进到下一阶段" style="width: 100%">
+              <el-option
+                v-for="st in STAGES"
+                :key="st"
+                :label="stageLabel(st)"
+                :value="st"
+                :disabled="STAGES.indexOf(st) <= STAGES.indexOf(advanceProgress.current_stage)"
+              />
+            </el-select>
+          </el-form-item>
+        </el-form>
 
         <div v-if="advanceProgress" class="stages">
           <div v-for="st in STAGES" :key="st" class="stage-row">
@@ -428,9 +449,9 @@ async function submitStageTimes() {
         <el-button @click="advanceVisible = false">关闭</el-button>
         <el-button
           type="primary"
-          :disabled="!advanceProgress?.can_advance"
+          :disabled="!advanceProgress"
           @click="doAdvance"
-        >推进到下一阶段</el-button>
+        >确认推进</el-button>
       </template>
     </el-dialog>
 

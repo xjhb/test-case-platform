@@ -8,7 +8,7 @@ from ..database import get_db
 from ..deps import accessible_project_ids, get_current_user, require_project_access
 from ..logger import log_op
 from ..models import Project, SystemConfig, TestCase, TestPlan, TestRun, User
-from ..schemas import StageTimeUpdate, TestPlanCreate, TestPlanOut
+from ..schemas import StageAdvance, StageTimeUpdate, TestPlanCreate, TestPlanOut
 
 router = APIRouter(prefix="/api/plans", tags=["测试计划"], dependencies=[Depends(get_current_user)])
 
@@ -160,7 +160,8 @@ def progress(plan_id: int, db: Session = Depends(get_db), current: User = Depend
         stages[stage] = {"total": total, "passed": passed, "failed": failed, "blocked": blocked, "pending": pending}
     current = plan.current_stage
     cur = stages[current]
-    can_advance = total > 0 and cur["passed"] == total and plan.status != "已完成"
+    # 灵活模式：始终允许推进，不再强制要求 100% 通过
+    can_advance = plan.status != "已完成"
     return {
         "plan_id": plan_id,
         "current_stage": current,
@@ -172,33 +173,47 @@ def progress(plan_id: int, db: Session = Depends(get_db), current: User = Depend
 
 
 @router.post("/{plan_id}/advance")
-def advance(plan_id: int, db: Session = Depends(get_db), current: User = Depends(get_current_user)):
+def advance(plan_id: int, payload: StageAdvance | None = None, db: Session = Depends(get_db), current: User = Depends(get_current_user)):
+    """阶段推进：支持顺序推进或跳转到任意阶段"""
     plan = db.get(TestPlan, plan_id)
     if not plan:
         raise HTTPException(status_code=404, detail="计划不存在")
     require_project_access(plan.project_id, db, current)
     if plan.status == "已完成":
         raise HTTPException(status_code=400, detail="计划已完成,无法推进")
-    stage = plan.current_stage
-    cases = list(db.execute(select(TestCase).where(TestCase.project_id == plan.project_id)).scalars())
-    if not cases:
-        raise HTTPException(status_code=400, detail="项目下没有测试用例,无法推进")
-    latest = _latest_status_map(db, plan_id, stage)
-    not_passed = [c.id for c in cases if latest.get(c.id) != "通过"]
-    if not_passed:
-        raise HTTPException(
-            status_code=400,
-            detail=f"当前阶段({stage})还有 {len(not_passed)} 条用例未通过,无法推进",
-        )
-    idx = STAGE_ORDER.index(stage)
-    if idx == len(STAGE_ORDER) - 1:  # PRE 已是最后阶段
-        plan.status = "已完成"
+
+    current_stage = plan.current_stage
+    target_stage = payload.target_stage.upper() if payload and payload.target_stage else None
+
+    # 确定目标阶段
+    if target_stage:
+        # 跳转到指定阶段
+        if target_stage not in STAGE_ORDER:
+            raise HTTPException(status_code=400, detail=f"阶段只能是 {'/'.join(STAGE_ORDER)}")
+        if target_stage == current_stage:
+            raise HTTPException(status_code=400, detail="目标阶段与当前阶段相同")
     else:
-        plan.current_stage = STAGE_ORDER[idx + 1]
+        # 顺序推进到下一阶段
+        idx = STAGE_ORDER.index(current_stage)
+        if idx == len(STAGE_ORDER) - 1:
+            raise HTTPException(status_code=400, detail="已是最后阶段(PRE),无法继续推进")
+        target_stage = STAGE_ORDER[idx + 1]
+
+    # 检查目标阶段是否有效
+    if STAGE_ORDER.index(target_stage) <= STAGE_ORDER.index(current_stage):
+        raise HTTPException(status_code=400, detail="只能向前推进,不能回退")
+
+    # 如果跳转到 PRE 或跳过中间阶段，标记计划为完成（如果目标是 PRE 之后）
+    if target_stage == "PRE":
+        # 推进到 PRE，不自动完成，让用户在 PRE 执行完后再手动完成
+        plan.current_stage = target_stage
+    else:
+        plan.current_stage = target_stage
+
     db.commit()
     db.refresh(plan)
     log_op(db, current, "推进", target=f"计划#{plan.id} {plan.version}",
-           detail=f"{stage} -> {plan.current_stage} ({plan.status})")
+           detail=f"{current_stage} -> {plan.current_stage}")
     return {"id": plan.id, "current_stage": plan.current_stage, "status": plan.status}
 
 
