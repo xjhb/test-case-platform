@@ -247,18 +247,16 @@ def _generate_report_data(db: Session, plan_id: int, stage: str, current: User) 
         raise HTTPException(404, "测试计划不存在")
     require_project_access(plan.project_id, db, current)
 
-    runs = list(db.execute(
-        select(TestRun).where(TestRun.plan_id == plan_id, TestRun.stage == stage)
+    cases = list(db.execute(
+        select(TestCase).where(TestCase.project_id == plan.project_id).order_by(TestCase.id.asc())
     ).scalars())
-
-    testcase_ids = {r.testcase_id for r in runs}
-    cases = list(db.execute(select(TestCase).where(TestCase.id.in_(testcase_ids))).scalars()) if testcase_ids else []
     case_map = {c.id: c for c in cases}
+    latest_map = _latest_run_map(db, plan_id, stage)
 
-    total = len(testcase_ids)
-    passed = sum(1 for r in runs if r.status == "通过")
-    failed = sum(1 for r in runs if r.status == "失败")
-    blocked = sum(1 for r in runs if r.status == "阻塞")
+    total = len(cases)
+    passed = sum(1 for c in cases if latest_map.get(c.id) and latest_map[c.id].status == "通过")
+    failed = sum(1 for c in cases if latest_map.get(c.id) and latest_map[c.id].status == "失败")
+    blocked = sum(1 for c in cases if latest_map.get(c.id) and latest_map[c.id].status == "阻塞")
     unexecuted = total - passed - failed - blocked
     pass_rate = round(passed / total * 100, 2) if total > 0 else 0.0
 
@@ -280,7 +278,7 @@ def _generate_report_data(db: Session, plan_id: int, stage: str, current: User) 
                 "executed_by": r.executed_by,
                 "executed_at": r.executed_at.isoformat() if r.executed_at else "",
             }
-            for r in runs
+            for r in sorted(latest_map.values(), key=lambda x: x.testcase_id)
         ],
         "defects": [
             {

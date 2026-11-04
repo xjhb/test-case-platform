@@ -363,9 +363,10 @@ async function submitStageTimes() {
           <el-tag :type="row.status === '已完成' ? 'success' : 'info'" size="small">{{ row.status }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="SIT 进度" width="120">
+      <el-table-column label="当前阶段通过率" width="150">
         <template #default="{ row }">
           <span>{{ row.passed_cases }} / {{ row.total_cases }}</span>
+          <span style="margin-left: 6px; color: #909399; font-size: 12px">{{ stageLabel(row.current_stage) }}</span>
         </template>
       </el-table-column>
       <el-table-column label="创建时间" width="170">

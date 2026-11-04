@@ -505,6 +505,14 @@ def batch_execute(
     require_can_edit(plan.project_id, db, current)
     stage = payload.stage or plan.current_stage
 
+    allowed_status = {"通过", "失败", "阻塞", "跳过"}
+    bad_status = [item.status for item in payload.items if item.status not in allowed_status]
+    if bad_status:
+        raise HTTPException(
+            status_code=400,
+            detail=f"执行状态只能是 {'/'.join(sorted(allowed_status))}, 收到: {', '.join(map(str, set(bad_status)))}",
+        )
+
     target_ids = [item.testcase_id for item in payload.items if item.status != "跳过"]
     if target_ids:
         valid_ids = set(

@@ -10,9 +10,11 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..deps import get_current_user, require_admin, require_project_access
 from ..logger import log_op
-from ..models import Defect, Project, TestPlan, TestRun, User
+from ..models import Defect, Project, TestCase, TestPlan, TestRun, User
 
 router = APIRouter(prefix="/api/integrations", tags=["外部集成"], dependencies=[Depends(get_current_user)])
+
+VALID_RUN_STATUS = {"通过", "失败", "阻塞"}
 
 
 # ===================== 数据模型 =====================
@@ -248,10 +250,23 @@ def report_automation_result(
     上报自动化测试执行结果
     支持 Selenium/Playwright/Cypress/JMeter 等框架
     """
+    plan = db.get(TestPlan, req.plan_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="测试计划不存在")
+    tc = db.get(TestCase, req.testcase_id)
+    if not tc:
+        raise HTTPException(status_code=404, detail="用例不存在")
+    if tc.project_id != plan.project_id:
+        raise HTTPException(status_code=400, detail="用例不属于该计划所在项目")
+    require_project_access(plan.project_id, db, current)
+    if req.status not in VALID_RUN_STATUS:
+        raise HTTPException(status_code=400, detail=f"执行状态只能是 {'/'.join(sorted(VALID_RUN_STATUS))}")
+
     # 创建测试执行记录
     run = TestRun(
         testcase_id=req.testcase_id,
         plan_id=req.plan_id,
+        stage=plan.current_stage,
         status=req.status,
         remark=req.error_message or f"自动化测试({req.framework})",
         screenshot=req.screenshot_url,
