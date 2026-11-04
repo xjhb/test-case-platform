@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..deps import accessible_project_ids, get_current_user, require_project_access
 from ..logger import log_op
-from ..models import TestCase, TestCaseVersion, TestPlan, TestRun, User
+from ..models import Defect, TestCase, TestCaseVersion, TestPlan, TestRun, User
 from ..schemas import TestCaseCreate, TestCaseOut, TestCaseUpdate
 
 router = APIRouter(prefix="/api/testcases", tags=["测试用例"], dependencies=[Depends(get_current_user)])
@@ -419,3 +419,80 @@ def reject_testcase(
     db.refresh(tc)
     log_op(db, current, "驳回", target=f"用例#{tc.id} {tc.title}", detail=comment[:50])
     return tc
+
+
+@router.get("/{tcid}/traceability")
+def testcase_traceability(
+    tcid: int,
+    db: Session = Depends(get_db),
+    current: User = Depends(get_current_user),
+):
+    """获取用例的完整追溯信息：关联的计划、执行记录、缺陷"""
+    tc = db.get(TestCase, tcid)
+    if not tc:
+        raise HTTPException(status_code=404, detail="用例不存在")
+    require_project_access(tc.project_id, db, current)
+
+    # 关联的执行记录（含计划信息）
+    runs = list(
+        db.execute(
+            select(TestRun).where(TestRun.testcase_id == tcid).order_by(TestRun.executed_at.desc())
+        ).scalars()
+    )
+    runs_with_plan = []
+    for r in runs:
+        plan = db.get(TestPlan, r.plan_id) if r.plan_id else None
+        runs_with_plan.append({
+            "id": r.id,
+            "status": r.status,
+            "stage": r.stage,
+            "remark": r.remark,
+            "screenshot": r.screenshot,
+            "executed_at": r.executed_at.isoformat() if r.executed_at else None,
+            "plan_id": r.plan_id,
+            "plan_version": plan.version if plan else None,
+        })
+
+    # 关联的缺陷
+    defects = list(
+        db.execute(
+            select(Defect).where(Defect.testcase_id == tcid).order_by(Defect.created_at.desc())
+        ).scalars()
+    )
+    defect_list = [{
+        "id": d.id,
+        "title": d.title,
+        "severity": d.severity,
+        "priority": d.priority,
+        "status": d.status,
+        "created_at": d.created_at.isoformat() if d.created_at else None,
+    } for d in defects]
+
+    # 关联的需求
+    from ..models import requirement_testcases
+    req_ids = [
+        row.requirement_id
+        for row in db.execute(
+            select(requirement_testcases.c.requirement_id).where(requirement_testcases.c.testcase_id == tcid)
+        ).all()
+    ]
+    from ..models import Requirement
+    requirements = []
+    for rid in req_ids:
+        req = db.get(Requirement, rid)
+        if req:
+            requirements.append({
+                "id": req.id,
+                "req_no": req.req_no,
+                "title": req.title,
+                "priority": req.priority,
+                "status": req.status,
+            })
+
+    return {
+        "testcase_id": tcid,
+        "testcase_title": tc.title,
+        "runs": runs_with_plan,
+        "defects": defect_list,
+        "requirements": requirements,
+    }

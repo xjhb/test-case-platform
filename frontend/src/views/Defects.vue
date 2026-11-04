@@ -41,8 +41,9 @@
       <el-table-column prop="created_at" label="创建时间" width="160">
         <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="180" fixed="right">
+      <el-table-column label="操作" width="240" fixed="right">
         <template #default="{ row }">
+          <el-button size="small" @click="showTrace(row)">来源</el-button>
           <el-button size="small" @click="showEditDialog(row)">编辑</el-button>
           <el-button size="small" type="danger" @click="handleDelete(row)" v-if="role === 'admin'">删除</el-button>
         </template>
@@ -78,8 +79,13 @@
           </el-select>
         </el-form-item>
         <el-form-item label="所属项目" v-if="!isEdit">
-          <el-select v-model="form.project_id" style="width: 100%">
+          <el-select v-model="form.project_id" style="width: 100%" @change="loadProjectTestcases">
             <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="关联用例" v-if="!isEdit">
+          <el-select v-model="form.testcase_id" placeholder="可选,追溯到具体用例" clearable filterable style="width: 100%">
+            <el-option v-for="tc in testcaseOptions" :key="tc.id" :label="`#${tc.id} ${tc.title}`" :value="tc.id" />
           </el-select>
         </el-form-item>
         <el-form-item label="指派人">
@@ -98,13 +104,51 @@
         <el-button type="primary" @click="handleSubmit" :loading="submitting">确定</el-button>
       </template>
     </el-dialog>
+
+    <!-- 缺陷来源追溯 -->
+    <el-dialog v-model="traceVisible" :title="traceTitle" width="640px">
+      <div v-loading="traceLoading">
+        <el-descriptions :column="1" border size="small" class="trace-desc">
+          <el-descriptions-item label="来源用例">
+            <template v-if="traceData.testcase">
+              #{{ traceData.testcase.id }} {{ traceData.testcase.title }}
+              <el-tag size="small" type="info" style="margin-left: 6px">{{ traceData.testcase.module || '-' }}</el-tag>
+              <el-tag :type="tcStatusType(traceData.testcase.status)" size="small" style="margin-left: 4px">{{ traceData.testcase.status }}</el-tag>
+            </template>
+            <span v-else style="color: #c0c4cc">未关联用例</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="来源执行记录">
+            <template v-if="traceData.run">
+              #{{ traceData.run.id }}
+              <el-tag :type="tcStatusType(traceData.run.status)" size="small" style="margin-left: 6px">{{ traceData.run.status }}</el-tag>
+              <el-tag size="small" style="margin-left: 4px">{{ traceData.run.stage || '-' }}</el-tag>
+              <span style="margin-left: 6px">{{ traceData.run.executed_by || '-' }}</span>
+              <span style="margin-left: 6px; color: #909399">{{ traceData.run.executed_at ? new Date(traceData.run.executed_at).toLocaleString('zh-CN') : '' }}</span>
+              <div v-if="traceData.run.remark" style="color: #606266; margin-top: 4px">备注: {{ traceData.run.remark }}</div>
+            </template>
+            <span v-else style="color: #c0c4cc">未关联执行记录</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="所属测试计划">
+            <template v-if="traceData.plan">
+              #{{ traceData.plan.id }} {{ traceData.plan.version }}
+              <el-tag size="small" style="margin-left: 6px">{{ traceData.plan.current_stage || '-' }}</el-tag>
+              <el-tag :type="traceData.plan.status === '已完成' ? 'success' : 'warning'" size="small" style="margin-left: 4px">{{ traceData.plan.status }}</el-tag>
+            </template>
+            <span v-else style="color: #c0c4cc">未关联计划</span>
+          </el-descriptions-item>
+        </el-descriptions>
+      </div>
+      <template #footer>
+        <el-button @click="traceVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { defectApi, projectApi, userApi } from '../api'
+import { defectApi, projectApi, userApi, testcaseApi } from '../api'
 
 const defects = ref([])
 const projects = ref([])
@@ -136,9 +180,22 @@ const form = reactive({
   severity: '一般',
   priority: 'P1',
   project_id: null,
+  testcase_id: null,
   assignee_id: null,
   status: '新建',
 })
+
+const testcaseOptions = ref([])
+
+const loadProjectTestcases = async (pid) => {
+  testcaseOptions.value = []
+  form.testcase_id = null
+  if (!pid) return
+  try {
+    const res = await testcaseApi.list({ project_id: pid, page_size: 200 })
+    testcaseOptions.value = res.items || []
+  } catch (e) { console.error(e) }
+}
 
 const severityTagType = (s) => {
   const map = { '致命': 'danger', '严重': 'warning', '一般': 'info', '提示': 'success' }
@@ -188,7 +245,8 @@ const loadUsers = async () => {
 
 const showCreateDialog = () => {
   isEdit.value = false
-  Object.assign(form, { title: '', description: '', severity: '一般', priority: 'P1', project_id: null, assignee_id: null, status: '新建' })
+  Object.assign(form, { title: '', description: '', severity: '一般', priority: 'P1', project_id: null, testcase_id: null, assignee_id: null, status: '新建' })
+  testcaseOptions.value = []
   dialogVisible.value = true
 }
 
@@ -226,6 +284,7 @@ const handleSubmit = async () => {
         severity: form.severity,
         priority: form.priority,
         project_id: form.project_id,
+        testcase_id: form.testcase_id,
         assignee_id: form.assignee_id,
       })
       ElMessage.success('创建成功')
@@ -253,6 +312,27 @@ const handleDelete = async (row) => {
 const handlePageChange = (p) => {
   page.value = p
   loadData()
+}
+
+// ---- 来源追溯 ----
+const traceVisible = ref(false)
+const traceLoading = ref(false)
+const traceTitle = ref('')
+const traceData = ref({ testcase: null, run: null, plan: null })
+
+const tcStatusType = (s) => ({ 未执行: 'info', 通过: 'success', 失败: 'danger', 阻塞: 'warning' }[s] || 'info')
+
+const showTrace = async (row) => {
+  traceTitle.value = `缺陷来源 - ${row.title}`
+  traceVisible.value = true
+  traceLoading.value = true
+  try {
+    traceData.value = await defectApi.traceability(row.id)
+  } catch (e) {
+    console.error(e)
+  } finally {
+    traceLoading.value = false
+  }
 }
 
 onMounted(() => {

@@ -67,6 +67,7 @@ export const testcaseApi = {
   submitReview: (id) => request.post(`/testcases/${id}/submit-review`),
   approve: (id, comment = '') => request.post(`/testcases/${id}/approve`, { comment }),
   reject: (id, comment) => request.post(`/testcases/${id}/reject`, { comment }),
+  traceability: (id) => request.get(`/testcases/${id}/traceability`),
 }
 
 // ---- 测试计划(版本/轮次) ----
@@ -139,6 +140,7 @@ export const defectApi = {
   update: (id, data) => request.put(`/defects/${id}`, data),
   remove: (id) => request.delete(`/defects/${id}`),
   stats: (params) => request.get('/defects/stats/summary', { params }),
+  traceability: (id) => request.get(`/defects/${id}/traceability`),
 }
 
 // ---- 通知 ----

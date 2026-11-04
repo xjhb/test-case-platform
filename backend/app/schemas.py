@@ -452,6 +452,7 @@ class CoverageMatrixItem(BaseModel):
     testcase_ids: list[int]
     testcase_count: int
     covered: bool
+    traceability: list[dict] = []
 
 
 # ===================== P2: RBAC 项目角色 =====================

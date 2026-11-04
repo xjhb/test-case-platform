@@ -518,6 +518,26 @@ async function openHistory(row) {
 const stageTagType = (s) => ({ SIT: 'primary', UAT: 'warning', PRE: 'danger' }[s] || 'info')
 const stageLabel = (s) => ({ SIT: 'SIT', UAT: 'UAT', PRE: '预发版' }[s] || s)
 
+// ---- 追溯视图 ----
+const traceVisible = ref(false)
+const traceLoading = ref(false)
+const traceTitle = ref('')
+const traceData = ref({ runs: [], defects: [], requirements: [] })
+const severityTagType = (s) => ({ 致命: 'danger', 严重: 'danger', 一般: 'warning', 提示: 'info' }[s] || 'info')
+const defectStatusType = (s) => ({ 新建: 'info', 处理中: 'warning', 已修复: 'primary', 已验证: 'success', 关闭: '', 重新打开: 'danger' }[s] || 'info')
+const reqStatusType = (s) => ({ 待处理: 'info', 进行中: 'warning', 已完成: 'success', 已关闭: '' }[s] || 'info')
+
+async function openTrace(row) {
+  traceTitle.value = `追溯 - ${row.title}`
+  traceVisible.value = true
+  traceLoading.value = true
+  try {
+    traceData.value = await testcaseApi.traceability(row.id)
+  } finally {
+    traceLoading.value = false
+  }
+}
+
 // ---- 文件夹目录树 ----
 const folderTree = ref([])
 const selectedFolderId = ref(null)
@@ -992,10 +1012,11 @@ onBeforeUnmount(() => {
           {{ new Date(row.updated_at).toLocaleString() }}
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="360" fixed="right">
+      <el-table-column label="操作" width="410" fixed="right">
         <template #default="{ row }">
           <el-button link type="success" @click="openExec(row)">执行</el-button>
           <el-button link type="primary" @click="openHistory(row)">历史</el-button>
+          <el-button link type="primary" @click="openTrace(row)">追溯</el-button>
           <el-button link type="info" @click="openVersions(row)">版本</el-button>
           <el-button
             v-if="row.review_status === '草稿' || row.review_status === '已驳回'"
@@ -1156,6 +1177,94 @@ onBeforeUnmount(() => {
         </el-table-column>
       </el-table>
       <el-empty v-if="!historyLoading && !historyList.length" description="暂无执行记录" />
+    </el-dialog>
+
+    <!-- 追溯视图 -->
+    <el-dialog v-model="traceVisible" :title="traceTitle" width="860px" top="6vh">
+      <div v-loading="traceLoading">
+        <div class="trace-section">
+          <div class="trace-section-title">
+            <el-icon><Link /></el-icon> 关联需求
+            <span class="trace-count">{{ traceData.requirements.length }}</span>
+          </div>
+          <el-table :data="traceData.requirements" border size="small" max-height="180">
+            <el-table-column prop="req_no" label="需求编号" width="120" />
+            <el-table-column prop="title" label="需求标题" min-width="200" show-overflow-tooltip />
+            <el-table-column label="优先级" width="90">
+              <template #default="{ row }">
+                <el-tag :type="({ 高: 'danger', 中: 'warning', 低: 'info' })[row.priority] || 'info'" size="small">{{ row.priority }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="状态" width="100">
+              <template #default="{ row }">
+                <el-tag :type="reqStatusType(row.status)" size="small">{{ row.status }}</el-tag>
+              </template>
+            </el-table-column>
+          </el-table>
+          <el-empty v-if="!traceData.requirements.length" description="未关联需求" :image-size="50" />
+        </div>
+
+        <div class="trace-section">
+          <div class="trace-section-title">
+            <el-icon><VideoPlay /></el-icon> 执行记录
+            <span class="trace-count">{{ traceData.runs.length }}</span>
+          </div>
+          <el-table :data="traceData.runs" border size="small" max-height="200">
+            <el-table-column prop="id" label="ID" width="60" />
+            <el-table-column label="计划" width="140">
+              <template #default="{ row }">{{ row.plan_version || '-' }}</template>
+            </el-table-column>
+            <el-table-column label="阶段" width="90">
+              <template #default="{ row }">
+                <el-tag :type="stageTagType(row.stage)" size="small">{{ stageLabel(row.stage) }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="结果" width="90">
+              <template #default="{ row }">
+                <el-tag :type="statusTagType(row.status)" size="small">{{ row.status }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="remark" label="备注" min-width="160" show-overflow-tooltip />
+            <el-table-column label="执行时间" width="170">
+              <template #default="{ row }">
+                {{ row.executed_at ? new Date(row.executed_at).toLocaleString() : '-' }}
+              </template>
+            </el-table-column>
+          </el-table>
+          <el-empty v-if="!traceData.runs.length" description="暂无执行记录" :image-size="50" />
+        </div>
+
+        <div class="trace-section">
+          <div class="trace-section-title">
+            <el-icon><Warning /></el-icon> 关联缺陷
+            <span class="trace-count">{{ traceData.defects.length }}</span>
+          </div>
+          <el-table :data="traceData.defects" border size="small" max-height="200">
+            <el-table-column prop="id" label="ID" width="60" />
+            <el-table-column prop="title" label="缺陷标题" min-width="200" show-overflow-tooltip />
+            <el-table-column label="严重程度" width="100">
+              <template #default="{ row }">
+                <el-tag :type="severityTagType(row.severity)" size="small">{{ row.severity }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="priority" label="优先级" width="80" />
+            <el-table-column label="状态" width="100">
+              <template #default="{ row }">
+                <el-tag :type="defectStatusType(row.status)" size="small">{{ row.status }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="创建时间" width="170">
+              <template #default="{ row }">
+                {{ row.created_at ? new Date(row.created_at).toLocaleString() : '-' }}
+              </template>
+            </el-table-column>
+          </el-table>
+          <el-empty v-if="!traceData.defects.length" description="暂无关联缺陷" :image-size="50" />
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="traceVisible = false">关闭</el-button>
+      </template>
     </el-dialog>
 
     <!-- 导入用例 -->
@@ -1429,5 +1538,25 @@ onBeforeUnmount(() => {
   margin-top: 16px;
   justify-content: flex-end;
   display: flex;
+}
+.trace-section {
+  margin-bottom: 18px;
+}
+.trace-section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+  margin-bottom: 8px;
+}
+.trace-count {
+  background: #ecf5ff;
+  color: #409eff;
+  border-radius: 10px;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: normal;
 }
 </style>

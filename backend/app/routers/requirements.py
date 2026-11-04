@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..deps import accessible_project_ids, get_current_user, require_project_access
 from ..logger import log_op
-from ..models import Requirement, TestCase, User, requirement_testcases
+from ..models import Defect, Requirement, TestCase, TestRun, User, requirement_testcases
 from ..schemas import CoverageMatrixItem, RequirementCreate, RequirementOut, RequirementUpdate
 
 router = APIRouter(prefix="/api/requirements", tags=["需求管理"], dependencies=[Depends(get_current_user)])
@@ -17,7 +17,7 @@ def coverage_matrix(
     db: Session = Depends(get_db),
     current: User = Depends(get_current_user),
 ):
-    """获取需求覆盖率矩阵"""
+    """获取需求覆盖率矩阵（含完整追溯链路）"""
     require_project_access(project_id, db, current)
 
     requirements = list(
@@ -32,6 +32,35 @@ def coverage_matrix(
                 select(requirement_testcases.c.testcase_id).where(requirement_testcases.c.requirement_id == req.id)
             ).all()
         ]
+        
+        # 获取每个用例的执行记录和缺陷
+        traceability = []
+        for tc_id in tc_ids:
+            tc = db.get(TestCase, tc_id)
+            if not tc:
+                continue
+            # 执行记录
+            runs = list(
+                db.execute(
+                    select(TestRun).where(TestRun.testcase_id == tc_id).order_by(TestRun.executed_at.desc())
+                ).scalars()
+            )
+            # 关联缺陷
+            defects = list(
+                db.execute(
+                    select(Defect).where(Defect.testcase_id == tc_id).order_by(Defect.created_at.desc())
+                ).scalars()
+            )
+            traceability.append({
+                "testcase_id": tc_id,
+                "testcase_title": tc.title,
+                "testcase_status": tc.status,
+                "run_count": len(runs),
+                "runs": [{"id": r.id, "status": r.status, "stage": r.stage, "executed_at": r.executed_at.isoformat() if r.executed_at else None} for r in runs[:5]],
+                "defect_count": len(defects),
+                "defects": [{"id": d.id, "title": d.title, "severity": d.severity, "status": d.status} for d in defects[:5]],
+            })
+        
         matrix.append(
             CoverageMatrixItem(
                 requirement_id=req.id,
@@ -42,6 +71,7 @@ def coverage_matrix(
                 testcase_ids=tc_ids,
                 testcase_count=len(tc_ids),
                 covered=len(tc_ids) > 0,
+                traceability=traceability,
             )
         )
 
@@ -55,7 +85,7 @@ def coverage_matrix(
         "covered_requirements": covered_reqs,
         "uncovered_requirements": total_reqs - covered_reqs,
         "coverage_rate": round(coverage_rate, 2),
-        "matrix": matrix,
+        "matrix": [item.model_dump() for item in matrix],
     }
 
 

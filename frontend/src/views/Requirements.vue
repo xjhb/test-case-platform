@@ -115,6 +115,53 @@
       </div>
 
       <el-table v-if="matrixData" :data="matrixData.matrix" border stripe>
+        <el-table-column type="expand">
+          <template #default="{ row }">
+            <div class="trace-box">
+              <div v-if="!row.traceability || !row.traceability.length" class="trace-empty">
+                该需求暂无关联用例的执行/缺陷链路
+              </div>
+              <el-table v-else :data="row.traceability" border size="small">
+                <el-table-column label="测试用例" min-width="200">
+                  <template #default="{ row: tc }">
+                    <span>#{{ tc.testcase_id }} {{ tc.testcase_title }}</span>
+                    <el-tag :type="tcStatusType(tc.testcase_status)" size="small" style="margin-left: 8px">
+                      {{ tc.testcase_status }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="执行记录" min-width="260">
+                  <template #default="{ row: tc }">
+                    <span v-if="!tc.run_count" style="color: #c0c4cc">未执行</span>
+                    <el-tag
+                      v-for="r in tc.runs"
+                      :key="r.id"
+                      :type="runTagType(r.status)"
+                      size="small"
+                      class="chain-tag"
+                    >
+                      {{ r.stage || '-' }}/{{ r.status }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="关联缺陷" min-width="260">
+                  <template #default="{ row: tc }">
+                    <span v-if="!tc.defect_count" style="color: #c0c4cc">无</span>
+                    <el-tag
+                      v-for="d in tc.defects"
+                      :key="d.id"
+                      :type="severityTagType(d.severity)"
+                      size="small"
+                      class="chain-tag"
+                    >
+                      #{{ d.id }} {{ d.severity }}/{{ d.status }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column prop="req_no" label="需求编号" width="120" />
         <el-table-column prop="req_title" label="需求标题" min-width="200" show-overflow-tooltip />
         <el-table-column label="优先级" width="90">
@@ -136,9 +183,7 @@
         </el-table-column>
         <el-table-column label="关联用例" width="120">
           <template #default="{ row }">
-            <el-button v-if="row.covered" link type="primary" @click="showTestcaseIds(row.testcase_ids)">
-              {{ row.testcase_count }}个
-            </el-button>
+            <span v-if="row.covered">{{ row.testcase_count }}个</span>
             <span v-else style="color: #c0c4cc">-</span>
           </template>
         </el-table-column>
@@ -254,6 +299,9 @@ const query = reactive({
 
 const priorityTagType = (p) => ({ 高: 'danger', 中: 'warning', 低: 'info' }[p] || 'info')
 const statusTagType = (s) => ({ 待处理: 'info', 进行中: 'warning', 已完成: 'success', 已关闭: '' }[s] || 'info')
+const tcStatusType = (s) => ({ 通过: 'success', 失败: 'danger', 阻塞: 'warning' }[s] || 'info')
+const runTagType = (s) => ({ 通过: 'success', 失败: 'danger', 阻塞: 'warning' }[s] || 'info')
+const severityTagType = (s) => ({ 致命: 'danger', 严重: 'danger', 一般: 'warning', 提示: 'info' }[s] || 'info')
 
 async function loadProjects() {
   projects.value = await projectApi.list()
@@ -422,10 +470,6 @@ async function showLinkedTestcases(row) {
   testcasesVisible.value = true
 }
 
-function showTestcaseIds(ids) {
-  ElMessageBox.alert(`关联的用例ID: ${ids.join(', ')}`, '关联用例', { type: 'info' })
-}
-
 onMounted(async () => {
   await loadProjects()
   if (projects.value.length) {
@@ -478,5 +522,18 @@ onMounted(async () => {
   color: #909399;
   font-size: 13px;
   margin-top: 4px;
+}
+
+.trace-box {
+  padding: 8px 40px 8px 20px;
+}
+
+.trace-empty {
+  color: #909399;
+  font-size: 13px;
+}
+
+.chain-tag {
+  margin: 2px 4px 2px 0;
 }
 </style>

@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..deps import accessible_project_ids, get_current_user, require_project_access
 from ..logger import log_op
-from ..models import Defect, Notification, Project, TestCase, TestPlan, User
+from ..models import Defect, Notification, Project, TestCase, TestPlan, TestRun, User
 from ..schemas import DefectCreate, DefectOut, DefectUpdate
 
 router = APIRouter(prefix="/api/defects", tags=["缺陷管理"], dependencies=[Depends(get_current_user)])
@@ -112,6 +112,7 @@ def create_defect(
         status="新建",
         testcase_id=body.testcase_id,
         plan_id=body.plan_id,
+        run_id=body.run_id,
         project_id=body.project_id,
         reporter_id=current.id,
         assignee_id=body.assignee_id,
@@ -287,3 +288,63 @@ def defect_stats(
         "by_severity": by_severity,
         "by_priority": by_priority,
     }
+
+
+@router.get("/{defect_id}/traceability")
+def defect_traceability(
+    defect_id: int,
+    db: Session = Depends(get_db),
+    current: User = Depends(get_current_user),
+):
+    """获取缺陷的完整追溯信息：关联的用例、执行记录、计划"""
+    defect = db.get(Defect, defect_id)
+    if not defect:
+        raise HTTPException(status_code=404, detail="缺陷不存在")
+    require_project_access(defect.project_id, db, current)
+
+    result = {
+        "defect_id": defect_id,
+        "defect_title": defect.title,
+        "testcase": None,
+        "run": None,
+        "plan": None,
+    }
+
+    # 关联的测试用例
+    if defect.testcase_id:
+        tc = db.get(TestCase, defect.testcase_id)
+        if tc:
+            result["testcase"] = {
+                "id": tc.id,
+                "title": tc.title,
+                "module": tc.module,
+                "priority": tc.priority,
+                "status": tc.status,
+            }
+
+    # 关联的执行记录
+    if defect.run_id:
+        run = db.get(TestRun, defect.run_id)
+        if run:
+            executor = db.get(User, run.executed_by)
+            result["run"] = {
+                "id": run.id,
+                "status": run.status,
+                "stage": run.stage,
+                "remark": run.remark,
+                "executed_at": run.executed_at.isoformat() if run.executed_at else None,
+                "executed_by": executor.display_name or executor.username if executor else None,
+            }
+
+    # 关联的测试计划
+    if defect.plan_id:
+        plan = db.get(TestPlan, defect.plan_id)
+        if plan:
+            result["plan"] = {
+                "id": plan.id,
+                "version": plan.version,
+                "current_stage": plan.current_stage,
+                "status": plan.status,
+            }
+
+    return result
