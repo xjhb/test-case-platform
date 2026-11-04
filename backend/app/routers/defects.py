@@ -62,7 +62,7 @@ def list_defects(
         like = f"%{keyword}%"
         q = q.where(Defect.title.ilike(like) | Defect.description.ilike(like))
 
-    total = db.execute(select(func.count(Defect.id)).where(q.whereclause)).scalar() or 0
+    total = db.execute(select(func.count()).select_from(q.subquery())).scalar() or 0
     items = list(db.execute(q.order_by(Defect.id.desc()).offset((page - 1) * size).limit(size)).scalars())
 
     result = []

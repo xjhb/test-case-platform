@@ -504,6 +504,20 @@ def batch_execute(
         raise HTTPException(status_code=404, detail="计划不存在")
     require_can_edit(plan.project_id, db, current)
     stage = payload.stage or plan.current_stage
+
+    target_ids = [item.testcase_id for item in payload.items if item.status != "跳过"]
+    if target_ids:
+        valid_ids = set(
+            db.execute(
+                select(TestCase.id).where(
+                    TestCase.id.in_(target_ids), TestCase.project_id == plan.project_id
+                )
+            ).scalars()
+        )
+        bad = [i for i in target_ids if i not in valid_ids]
+        if bad:
+            raise HTTPException(status_code=400, detail=f"用例不存在或不属于该计划所在项目: {', '.join(map(str, bad))}")
+
     success_count = 0
     fail_count = 0
     for item in payload.items:
