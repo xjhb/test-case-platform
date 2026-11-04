@@ -1,6 +1,7 @@
 import io
 import json
 from datetime import datetime
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -232,10 +233,14 @@ def export_plan_report(plan_id: int, db: Session = Depends(get_db), current: Use
     buf.seek(0)
     log_op(db, current, "导出", target=f"测试报告 计划#{plan.id} {plan.version}")
     fname = f"test_report_{plan.version}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    # 版本名可能含中文, 需要 RFC 5987 编码, 否则浏览器下载到的文件名会乱码
+    ascii_name = fname.encode("ascii", "ignore").decode() or "test_report.xlsx"
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+        headers={
+            "Content-Disposition": f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(fname)}"
+        },
     )
 
 

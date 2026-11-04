@@ -1,4 +1,11 @@
 import os
+import sys
+
+# Windows 下 stdout 默认 GBK: 中文日志会变成乱码字节, emoji 会直接抛 UnicodeEncodeError
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI

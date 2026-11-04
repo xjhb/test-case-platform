@@ -7,6 +7,11 @@ import sys
 import json
 from pathlib import Path
 
+# Windows 控制台默认 GBK, emoji 会让 print 直接抛 UnicodeEncodeError
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 # 添加 backend 到路径
 sys.path.insert(0, str(Path(__file__).parent.parent / "backend"))
 
@@ -16,7 +21,7 @@ def load_env_config():
     """从 .env 文件加载配置"""
     env_path = Path(__file__).parent.parent / "backend" / ".env"
     if not env_path.exists():
-        print(f"❌ .env 文件不存在: {env_path}")
+        print(f"[FAIL] .env 文件不存在: {env_path}")
         print("请先复制 .env.example 为 .env 并配置")
         sys.exit(1)
     
@@ -38,7 +43,7 @@ def push_to_nacos(config):
     try:
         import nacos
     except ImportError:
-        print("❌ 未安装 nacos-sdk-python")
+        print("[FAIL] 未安装 nacos-sdk-python")
         print("请运行: pip install nacos-sdk-python")
         sys.exit(1)
     
@@ -51,7 +56,7 @@ def push_to_nacos(config):
     nacos_password = os.getenv("NACOS_PASSWORD", "")
     
     if not nacos_server:
-        print("❌ 未配置 NACOS_SERVER")
+        print("[FAIL] 未配置 NACOS_SERVER")
         print("请在 .env 文件中配置 NACOS_SERVER")
         sys.exit(1)
     
@@ -73,7 +78,7 @@ def push_to_nacos(config):
         result = client.publish_config(nacos_data_id, nacos_group, config_json)
         
         if result:
-            print("✅ 配置已成功推送到 Nacos")
+            print("[OK] 配置已成功推送到 Nacos")
             print("\n配置内容:")
             print("-" * 60)
             # 隐藏敏感信息
@@ -86,11 +91,11 @@ def push_to_nacos(config):
             print("-" * 60)
             return True
         else:
-            print("❌ 推送配置失败")
+            print("[FAIL] 推送配置失败")
             return False
             
     except Exception as e:
-        print(f"❌ 连接 Nacos 失败: {e}")
+        print(f"[FAIL] 连接 Nacos 失败: {e}")
         sys.exit(1)
 
 
@@ -120,7 +125,7 @@ def main():
         print("3. 可以在 Nacos 控制台查看和修改配置")
     else:
         print()
-        print("❌ 迁移失败，请检查 Nacos 连接配置")
+        print("[FAIL] 迁移失败，请检查 Nacos 连接配置")
         sys.exit(1)
 
 

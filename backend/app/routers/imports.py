@@ -56,7 +56,18 @@ async def import_testcases(
         ws = wb.active
         data = [list(r) for r in ws.iter_rows(values_only=True)]
     elif ext == "csv":
-        text = content.decode("utf-8-sig")
+        # 中文 Windows 上 Excel 另存的 CSV 是 GBK/ANSI, 不是 UTF-8
+        for enc in ("utf-8-sig", "gbk"):
+            try:
+                text = content.decode(enc)
+                break
+            except UnicodeDecodeError:
+                continue
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="CSV 编码无法识别, 请另存为 UTF-8 或 GBK 编码, 或直接上传 .xlsx",
+            )
         data = list(csv.reader(io.StringIO(text)))
     else:
         raise HTTPException(status_code=400, detail="仅支持 .xlsx 或 .csv 文件")

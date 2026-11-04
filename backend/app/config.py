@@ -54,13 +54,13 @@ class Settings(BaseSettings):
                 if "cors_origins" in config:
                     self.cors_origins = config["cors_origins"]
                 
-                print(f"✅ 已从 Nacos 加载配置: {self.nacos_data_id}")
+                print(f"[OK] 已从 Nacos 加载配置: {self.nacos_data_id}")
             else:
-                print(f"⚠️ Nacos 中未找到配置: {self.nacos_data_id}，使用本地 .env 配置")
+                print(f"[WARN] Nacos 中未找到配置: {self.nacos_data_id}，使用本地 .env 配置")
         except ImportError:
-            print("⚠️ 未安装 nacos-sdk-python，使用本地 .env 配置")
+            print("[WARN] 未安装 nacos-sdk-python，使用本地 .env 配置")
         except Exception as e:
-            print(f"⚠️ 从 Nacos 加载配置失败: {e}，使用本地 .env 配置")
+            print(f"[WARN] 从 Nacos 加载配置失败: {e}，使用本地 .env 配置")
 
 
 settings = Settings()

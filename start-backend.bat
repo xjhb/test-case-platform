@@ -1,5 +1,6 @@
 @echo off
 chcp 65001 >nul
+set PYTHONUTF8=1
 title 测管平台-后端
 cd /d D:\testmanage\backend
 echo Starting backend on http://127.0.0.1:8000  (API docs: http://127.0.0.1:8000/docs)
