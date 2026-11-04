@@ -230,8 +230,9 @@ async function loadTestcasesForBatch() {
   if (!batchPlan.value) return
   batchTestcasesLoading.value = true
   try {
-    const res = await testcaseApi.list({ project_id: batchPlan.value.project_id, page_size: 200 })
-    batchTestcases.value = res.items || []
+    // 批量执行只允许计划范围内的用例,列表直接取圈选范围
+    const res = await planApi.cases(batchPlan.value.id)
+    batchTestcases.value = res.cases || []
   } catch (e) {
     batchTestcases.value = []
   } finally {
@@ -321,6 +322,79 @@ async function submitStageTimes() {
   stageTimeVisible.value = false
   load()
 }
+
+// ---- 用例范围圈选 ----
+const scopeVisible = ref(false)
+const scopePlan = ref(null)
+const scopeLoading = ref(false)
+const scopeSaving = ref(false)
+const scopeAllCases = ref([])
+const scopeSelected = ref([])
+const scopeKeyword = ref('')
+
+const scopeFiltered = computed(() => {
+  const kw = scopeKeyword.value.trim().toLowerCase()
+  if (!kw) return scopeAllCases.value
+  return scopeAllCases.value.filter(
+    (c) => String(c.id) === kw || (c.title || '').toLowerCase().includes(kw) || (c.module || '').toLowerCase().includes(kw)
+  )
+})
+
+async function openScope(row) {
+  scopePlan.value = row
+  scopeVisible.value = true
+  scopeLoading.value = true
+  scopeKeyword.value = ''
+  try {
+    const [scope, cases] = await Promise.all([
+      planApi.cases(row.id),
+      testcaseApi.list({ project_id: row.project_id, page_size: 500 }),
+    ])
+    scopeAllCases.value = cases.items || []
+    scopeSelected.value = scope.scoped ? [...scope.case_ids] : []
+  } catch (e) {
+    scopeAllCases.value = []
+    scopeSelected.value = []
+  } finally {
+    scopeLoading.value = false
+  }
+}
+
+function toggleScopeCase(tc) {
+  const idx = scopeSelected.value.indexOf(tc.id)
+  if (idx >= 0) scopeSelected.value.splice(idx, 1)
+  else scopeSelected.value.push(tc.id)
+}
+
+async function saveScope(mode) {
+  if (mode !== 'all' && !scopeSelected.value.length) {
+    await ElMessageBox.confirm('用例范围为空,统计将回退为项目全部用例。确认保存?', '提示', { type: 'warning' })
+  }
+  scopeSaving.value = true
+  try {
+    await planApi.setCases(scopePlan.value.id, scopeSelected.value, mode)
+    ElMessage.success(mode === 'all' ? '已纳入项目全部用例' : `用例范围已保存(${scopeSelected.value.length} 条)`)
+    scopeVisible.value = false
+    load()
+  } catch (e) {
+    // 错误由拦截器提示
+  } finally {
+    scopeSaving.value = false
+  }
+}
+
+async function clearScope() {
+  scopeSaving.value = true
+  try {
+    await planApi.setCases(scopePlan.value.id, [], 'replace')
+    scopeSelected.value = []
+    ElMessage.success('已清空圈选,统计回退为项目全部用例')
+    scopeVisible.value = false
+    load()
+  } finally {
+    scopeSaving.value = false
+  }
+}
 </script>
 
 <template>
@@ -363,6 +437,12 @@ async function submitStageTimes() {
           <el-tag :type="row.status === '已完成' ? 'success' : 'info'" size="small">{{ row.status }}</el-tag>
         </template>
       </el-table-column>
+      <el-table-column label="用例范围" width="130">
+        <template #default="{ row }">
+          <el-tag v-if="row.scoped" type="success" size="small">已圈选 {{ row.total_cases }}</el-tag>
+          <el-tag v-else type="info" size="small">全部 {{ row.total_cases }}</el-tag>
+        </template>
+      </el-table-column>
       <el-table-column label="当前阶段通过率" width="150">
         <template #default="{ row }">
           <span>{{ row.passed_cases }} / {{ row.total_cases }}</span>
@@ -374,13 +454,14 @@ async function submitStageTimes() {
           {{ new Date(row.created_at).toLocaleString() }}
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="520" fixed="right">
+      <el-table-column label="操作" width="600" fixed="right">
         <template #default="{ row }">
           <el-button link type="success" @click="openRounds(row)">打开轮次</el-button>
           <el-button link type="primary" @click="openRoundsDialog(row)">轮次管理</el-button>
           <el-button link type="warning" @click="openBatchDialog(row)">批量执行</el-button>
           <el-button link type="primary" @click="openAdvance(row)" :disabled="row.status === '已完成'">阶段推进</el-button>
           <el-button link type="primary" @click="openStageTimes(row)">阶段时间</el-button>
+          <el-button link type="primary" @click="openScope(row)">用例范围</el-button>
           <el-button link type="success" @click="exportReport(row)">导出报告</el-button>
           <el-button link type="danger" @click="remove(row)">删除</el-button>
         </template>
@@ -571,6 +652,45 @@ async function submitStageTimes() {
       <template #footer>
         <el-button @click="batchVisible = false">取消</el-button>
         <el-button type="primary" :loading="batchSubmitting" :disabled="!batchItems.length" @click="submitBatch">执行 {{ batchItems.length }} 条用例</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 用例范围圈选 -->
+    <el-dialog v-model="scopeVisible" :title="`用例范围 - ${scopePlan?.version || ''}`" width="800px" top="5vh">
+      <el-alert
+        :title="scopePlan && !scopePlan.scoped
+          ? `当前未圈选,统计按项目全部 ${scopePlan.total_cases} 条用例计算;圈选后仅按所选用例计算`
+          : `已圈选 ${scopeSelected.length} 条用例,看板/报告/趋势均以该范围为分母`"
+        :type="scopePlan && !scopePlan.scoped ? 'warning' : 'success'"
+        :closable="false"
+        show-icon
+        style="margin-bottom: 12px"
+      />
+      <div style="display: flex; gap: 12px; margin-bottom: 12px">
+        <el-input v-model="scopeKeyword" placeholder="按 ID/标题/模块 过滤" clearable style="width: 240px" />
+        <el-button size="small" @click="scopeSelected = scopeFiltered.map(c => c.id)">选中当前列表</el-button>
+        <el-button size="small" @click="scopeSelected = []">清空选择</el-button>
+        <span style="align-self: center; color: #909399; font-size: 13px">已选 {{ scopeSelected.length }} / {{ scopeAllCases.length }}</span>
+      </div>
+
+      <el-table v-loading="scopeLoading" :data="scopeFiltered" border size="small" max-height="380">
+        <el-table-column label="选择" width="60">
+          <template #default="{ row }">
+            <el-checkbox :model-value="scopeSelected.includes(row.id)" @change="toggleScopeCase(row)" />
+          </template>
+        </el-table-column>
+        <el-table-column prop="id" label="ID" width="70" />
+        <el-table-column prop="module" label="模块" width="120" show-overflow-tooltip />
+        <el-table-column prop="title" label="用例标题" min-width="200" show-overflow-tooltip />
+        <el-table-column prop="priority" label="优先级" width="80" />
+        <el-table-column prop="status" label="状态" width="90" />
+      </el-table>
+
+      <template #footer>
+        <el-button @click="scopeVisible = false">取消</el-button>
+        <el-button :loading="scopeSaving" @click="clearScope">恢复为全部用例</el-button>
+        <el-button :loading="scopeSaving" @click="saveScope('all')">纳入项目全部</el-button>
+        <el-button type="primary" :loading="scopeSaving" @click="saveScope('replace')">保存范围</el-button>
       </template>
     </el-dialog>
   </div>

@@ -19,6 +19,7 @@ from ..schemas import (
     TagAssign, TagCreate, TagOut,
     TestRoundCreate, TestRoundOut,
 )
+from ..scope import plan_case_ids
 
 router = APIRouter(prefix="/api/p2", tags=["P2功能"], dependencies=[Depends(get_current_user)])
 
@@ -515,16 +516,13 @@ def batch_execute(
 
     target_ids = [item.testcase_id for item in payload.items if item.status != "跳过"]
     if target_ids:
-        valid_ids = set(
-            db.execute(
-                select(TestCase.id).where(
-                    TestCase.id.in_(target_ids), TestCase.project_id == plan.project_id
-                )
-            ).scalars()
-        )
-        bad = [i for i in target_ids if i not in valid_ids]
+        scope_ids = set(plan_case_ids(db, plan))
+        valid_ids = set(db.execute(select(TestCase.id).where(TestCase.id.in_(target_ids))).scalars())
+        bad = [i for i in target_ids if i not in valid_ids or i not in scope_ids]
         if bad:
-            raise HTTPException(status_code=400, detail=f"用例不存在或不属于该计划所在项目: {', '.join(map(str, bad))}")
+            raise HTTPException(
+                status_code=400, detail=f"用例不存在或不在计划#{plan.id}的用例范围内: {', '.join(map(str, bad))}"
+            )
 
     success_count = 0
     fail_count = 0

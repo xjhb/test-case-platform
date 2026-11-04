@@ -190,6 +190,33 @@ class TestCaseOut(BaseModel):
         return v if v is not None else ""
 
 
+# ---------- 结构化用例步骤 ----------
+class TestCaseStepIn(BaseModel):
+    step_no: int = 1
+    action: str = ""
+    expected: str = ""
+    data: str = ""
+
+
+class TestCaseStepOut(TestCaseStepIn):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    testcase_id: int
+
+
+class StepResultIn(BaseModel):
+    step_id: int
+    status: str  # 通过/失败/阻塞/未执行
+    actual: str = ""
+    screenshot: str = ""
+
+
+class StepResultOut(StepResultIn):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    run_id: int
+
+
 # ---------- 测试计划(版本/轮次) ----------
 class TestPlanCreate(BaseModel):
     project_id: int
@@ -208,6 +235,12 @@ class StageTimeUpdate(BaseModel):
 class StageAdvance(BaseModel):
     """阶段推进请求，支持跳转到任意阶段"""
     target_stage: str | None = None  # 目标阶段，不传则推进到下一阶段
+
+
+class PlanCasesPayload(BaseModel):
+    """计划用例圈选"""
+    testcase_ids: list[int] = Field(default_factory=list)
+    mode: str = "replace"  # replace/add/remove/all
 
 
 class TestPlanOut(BaseModel):
@@ -235,6 +268,7 @@ class TestRunCreate(BaseModel):
     remark: str = ""
     screenshot: str = ""  # 通过时必填,成功截图URL
     stage: str | None = None  # 执行阶段 SIT/UAT/PRE;不传则用计划当前阶段
+    step_results: list[StepResultIn] = Field(default_factory=list)  # 逐步骤结果;非空时用例状态由步骤推导
 
 
 class TestRunOut(BaseModel):

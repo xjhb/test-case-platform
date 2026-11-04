@@ -111,6 +111,42 @@ class TestRun(Base):
     round_id: Mapped[int | None] = mapped_column(ForeignKey("test_rounds.id", ondelete="SET NULL"), nullable=True, index=True)  # 所属轮次
 
 
+# ===================== 计划-用例 圈选范围(快照) =====================
+class PlanTestCase(Base):
+    """计划实际纳入的用例集合。统计分母以此为准;未圈选时回退到项目全部用例。"""
+    __tablename__ = "plan_testcases"
+
+    plan_id: Mapped[int] = mapped_column(ForeignKey("testplans.id", ondelete="CASCADE"), primary_key=True)
+    testcase_id: Mapped[int] = mapped_column(ForeignKey("testcases.id", ondelete="CASCADE"), primary_key=True, index=True)
+    added_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    added_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+# ===================== 结构化用例步骤 =====================
+class TestCaseStep(Base):
+    """用例步骤(逐步给出操作与预期结果)"""
+    __tablename__ = "testcase_steps"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    testcase_id: Mapped[int] = mapped_column(ForeignKey("testcases.id", ondelete="CASCADE"), index=True)
+    step_no: Mapped[int] = mapped_column(Integer, default=1)
+    action: Mapped[str] = mapped_column(Text, default="")  # 操作步骤
+    expected: Mapped[str] = mapped_column(Text, default="")  # 预期结果
+    data: Mapped[str] = mapped_column(Text, default="")  # 测试数据(参数化占位)
+
+
+class StepResult(Base):
+    """执行时逐步骤的实际结果;整条用例状态由步骤结果推导"""
+    __tablename__ = "testcase_step_results"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("testruns.id", ondelete="CASCADE"), index=True)
+    step_id: Mapped[int] = mapped_column(ForeignKey("testcase_steps.id", ondelete="CASCADE"), index=True)
+    status: Mapped[str] = mapped_column(String(16), default="未执行")  # 通过/失败/阻塞/未执行
+    actual: Mapped[str] = mapped_column(Text, default="")  # 实际结果
+    screenshot: Mapped[str] = mapped_column(String(500), default="")
+
+
 # 成员-项目 多对多分配表(成员只能看到分配给自己的项目)
 user_projects = Table(
     "user_projects",

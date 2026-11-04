@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..deps import accessible_project_ids, get_current_user, require_project_access
 from ..models import Project, TestCase, TestPlan, TestRun, User
+from ..scope import has_scope, plan_case_ids
 
 router = APIRouter(prefix="/api/stats", tags=["统计看板"], dependencies=[Depends(get_current_user)])
 
@@ -102,10 +103,17 @@ def dashboard(
     severe_defect_ratio = 0
     daily_trend = []
     per_person = []
+    plan_scoped = False
+    scope_cases = None
 
     if target_plan:
         pid = target_plan.id
+        # 统计分母以计划圈选范围为准(未圈选则回退项目全部用例)
+        plan_scope = set(plan_case_ids(db, target_plan))
+        plan_scoped = has_scope(db, target_plan)
+        cases = [c for c in cases if c.id in plan_scope]
         total_cases = len(cases)
+        scope_cases = total_cases
 
         for st in STAGE_ORDER:
             latest = _latest_runs(db, pid, st)
@@ -165,7 +173,7 @@ def dashboard(
         )
         if stage:
             trend_q = trend_q.where(TestRun.stage == stage)
-        trend_runs = list(db.execute(trend_q).scalars())
+        trend_runs = [r for r in list(db.execute(trend_q).scalars()) if r.testcase_id in plan_scope]
         for i in range(7):
             d = (datetime.now() - timedelta(days=6 - i)).date()
             count = sum(1 for r in trend_runs if r.executed_at.date() == d)
@@ -175,7 +183,7 @@ def dashboard(
         all_runs_q = select(TestRun).where(TestRun.plan_id == pid)
         if stage:
             all_runs_q = all_runs_q.where(TestRun.stage == stage)
-        all_runs = list(db.execute(all_runs_q).scalars())
+        all_runs = [r for r in list(db.execute(all_runs_q).scalars()) if r.testcase_id in plan_scope]
         user_counts: dict[int, int] = {}
         for r in all_runs:
             user_counts[r.executed_by] = user_counts.get(r.executed_by, 0) + 1
@@ -209,6 +217,8 @@ def dashboard(
             "project_id": project_id,
             "plan_id": plan_id,
             "stage": stage or (target_plan.current_stage if target_plan else None),
+            "scoped": plan_scoped,
+            "scope_cases": scope_cases,
         },
         # 测试质量
         "quality": {
@@ -231,7 +241,7 @@ def dashboard(
 def _empty_dashboard():
     return {
         "overview": {"projects": 0, "cases": 0, "plans": 0, "plans_in_progress": 0},
-        "filters": {"project_id": None, "plan_id": None, "stage": None},
+        "filters": {"project_id": None, "plan_id": None, "stage": None, "scoped": False, "scope_cases": None},
         "quality": {"health_score": 0, "health_level": "green", "health_desc": "无数据",
                      "severe_defect_ratio": 0, "stages": []},
         "efficiency": {"execution_progress": 0, "stage_completion": [], "daily_trend": [], "per_person": []},
@@ -258,14 +268,15 @@ def pass_rate_trends(
 
     trends = []
     for plan in plans:
-        cases = list(db.execute(select(TestCase).where(TestCase.project_id == project_id)).scalars())
-        total = len(cases)
+        # 每个版本的分母用该计划圈选的用例范围,与看板/报告保持一致
+        scope_ids = plan_case_ids(db, plan)
+        total = len(scope_ids)
         if total == 0:
             continue
 
         latest = _latest_runs(db, plan.id, stage)
-        passed = sum(1 for c in cases if latest.get(c.id) and latest[c.id].status == "通过")
-        pass_rate = round(passed / total * 100, 1) if total else 0
+        passed = sum(1 for cid in scope_ids if latest.get(cid) and latest[cid].status == "通过")
+        pass_rate = round(passed / total * 100, 1)
 
         trends.append({
             "plan_id": plan.id,

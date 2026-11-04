@@ -14,6 +14,7 @@ from ..database import get_db
 from ..deps import accessible_project_ids, get_current_user, require_project_access
 from ..logger import log_op
 from ..models import Defect, Project, TestCase, TestPlan, TestReport, TestRun, User
+from ..scope import plan_cases
 from ..schemas import TestReportOut
 
 router = APIRouter(prefix="/api/reports", tags=["测试报告"], dependencies=[Depends(get_current_user)])
@@ -54,9 +55,7 @@ def export_plan_report(plan_id: int, db: Session = Depends(get_db), current: Use
         raise HTTPException(status_code=404, detail="计划不存在")
     require_project_access(plan.project_id, db, current)
     project = db.get(Project, plan.project_id)
-    cases = list(
-        db.execute(select(TestCase).where(TestCase.project_id == plan.project_id).order_by(TestCase.id.asc())).scalars()
-    )
+    cases = plan_cases(db, plan)
 
     stage_maps = {st: _latest_run_map(db, plan_id, st) for st in STAGE_ORDER}
 
@@ -252,11 +251,9 @@ def _generate_report_data(db: Session, plan_id: int, stage: str, current: User) 
         raise HTTPException(404, "测试计划不存在")
     require_project_access(plan.project_id, db, current)
 
-    cases = list(db.execute(
-        select(TestCase).where(TestCase.project_id == plan.project_id).order_by(TestCase.id.asc())
-    ).scalars())
+    cases = plan_cases(db, plan)
     case_map = {c.id: c for c in cases}
-    latest_map = _latest_run_map(db, plan_id, stage)
+    latest_map = {k: v for k, v in _latest_run_map(db, plan_id, stage).items() if k in case_map}
 
     total = len(cases)
     passed = sum(1 for c in cases if latest_map.get(c.id) and latest_map[c.id].status == "通过")
@@ -277,7 +274,7 @@ def _generate_report_data(db: Session, plan_id: int, stage: str, current: User) 
         "runs": [
             {
                 "testcase_id": r.testcase_id,
-                "testcase_title": case_map.get(r.testcase_id, TestCase(title="")).title,
+                "testcase_title": case_map[r.testcase_id].title,
                 "status": r.status,
                 "remark": r.remark,
                 "executed_by": r.executed_by,

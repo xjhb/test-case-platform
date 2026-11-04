@@ -68,6 +68,8 @@ export const testcaseApi = {
   approve: (id, comment = '') => request.post(`/testcases/${id}/approve`, { comment }),
   reject: (id, comment) => request.post(`/testcases/${id}/reject`, { comment }),
   traceability: (id) => request.get(`/testcases/${id}/traceability`),
+  steps: (id) => request.get(`/testcases/${id}/steps`),
+  saveSteps: (id, steps) => request.put(`/testcases/${id}/steps`, steps),
 }
 
 // ---- 测试计划(版本/轮次) ----
@@ -80,6 +82,8 @@ export const planApi = {
   updateStageTimes: (id, data) => request.put(`/plans/${id}/stage-times`, data),
   countdown: (id, stage) => request.get(`/plans/${id}/countdown`, { params: stage ? { stage } : {} }),
   calendar: (params) => request.get('/plans/calendar', { params }),
+  cases: (id) => request.get(`/plans/${id}/cases`),
+  setCases: (id, testcaseIds, mode = 'replace') => request.post(`/plans/${id}/cases`, { testcase_ids: testcaseIds, mode }),
 }
 
 // ---- 文件上传 ----
@@ -182,6 +186,7 @@ export const runApi = {
   create: (data) => request.post('/runs', data),
   list: (testcaseId, planId) =>
     request.get('/runs', { params: { testcase_id: testcaseId, plan_id: planId } }),
+  stepResults: (runId) => request.get(`/runs/${runId}/step-results`),
 }
 
 // ---- 团队管理 ----

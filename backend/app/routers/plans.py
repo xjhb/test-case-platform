@@ -1,14 +1,15 @@
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..deps import accessible_project_ids, get_current_user, require_project_access
 from ..logger import log_op
-from ..models import Project, SystemConfig, TestCase, TestPlan, TestRun, User
-from ..schemas import StageAdvance, StageTimeUpdate, TestPlanCreate, TestPlanOut
+from ..models import PlanTestCase, Project, SystemConfig, TestCase, TestPlan, TestRun, User
+from ..schemas import PlanCasesPayload, StageAdvance, StageTimeUpdate, TestPlanCreate, TestPlanOut
+from ..scope import has_scope, plan_case_ids
 
 router = APIRouter(prefix="/api/plans", tags=["测试计划"], dependencies=[Depends(get_current_user)])
 
@@ -80,11 +81,11 @@ def list_plans(project_id: int | None = None, db: Session = Depends(get_db), cur
     plans = list(db.execute(q.order_by(TestPlan.id.desc())).scalars())
     out = []
     for p in plans:
-        total = db.execute(
-            select(func.count()).select_from(TestCase).where(TestCase.project_id == p.project_id)
-        ).scalar_one()
+        ids = plan_case_ids(db, p)
+        scoped = has_scope(db, p)
         latest = _latest_status_map(db, p.id, p.current_stage)
-        passed = sum(1 for v in latest.values() if v == "通过")
+        passed = sum(1 for cid in ids if latest.get(cid) == "通过")
+        executed = sum(1 for cid in ids if cid in latest)
         out.append({
             "id": p.id,
             "project_id": p.project_id,
@@ -92,8 +93,10 @@ def list_plans(project_id: int | None = None, db: Session = Depends(get_db), cur
             "current_stage": p.current_stage,
             "status": p.status,
             "created_at": p.created_at.isoformat() if p.created_at else None,
-            "total_cases": total,
+            "total_cases": len(ids),
             "passed_cases": passed,
+            "executed_cases": executed,
+            "scoped": scoped,
             "sit_start": _fmt(p.sit_start),
             "sit_end": _fmt(p.sit_end),
             "uat_start": _fmt(p.uat_start),
@@ -140,9 +143,8 @@ def progress(plan_id: int, db: Session = Depends(get_db), current: User = Depend
     if not plan:
         raise HTTPException(status_code=404, detail="计划不存在")
     require_project_access(plan.project_id, db, current)
-    cases = list(db.execute(select(TestCase).where(TestCase.project_id == plan.project_id)).scalars())
-    total = len(cases)
-    case_ids = [c.id for c in cases]
+    case_ids = plan_case_ids(db, plan)
+    total = len(case_ids)
     stages = {}
     for stage in STAGE_ORDER:
         latest = _latest_status_map(db, plan_id, stage)
@@ -215,6 +217,79 @@ def advance(plan_id: int, payload: StageAdvance | None = None, db: Session = Dep
     log_op(db, current, "推进", target=f"计划#{plan.id} {plan.version}",
            detail=f"{current_stage} -> {plan.current_stage}")
     return {"id": plan.id, "current_stage": plan.current_stage, "status": plan.status}
+
+
+@router.get("/{plan_id}/cases")
+def get_plan_cases(plan_id: int, db: Session = Depends(get_db), current: User = Depends(get_current_user)):
+    """计划的用例圈选范围;scoped=False 表示尚未圈选,统计按项目全部用例"""
+    plan = db.get(TestPlan, plan_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="计划不存在")
+    require_project_access(plan.project_id, db, current)
+    scoped = has_scope(db, plan)
+    ids = plan_case_ids(db, plan)
+    rows = list(db.execute(select(TestCase).where(TestCase.id.in_(ids))).scalars()) if ids else []
+    row_map = {c.id: c for c in rows}
+    return {
+        "plan_id": plan_id,
+        "scoped": scoped,
+        "case_ids": ids,
+        "cases": [
+            {"id": i, "title": row_map[i].title, "module": row_map[i].module, "priority": row_map[i].priority}
+            for i in ids
+            if i in row_map
+        ],
+    }
+
+
+@router.post("/{plan_id}/cases")
+def update_plan_cases(
+    plan_id: int,
+    payload: PlanCasesPayload,
+    db: Session = Depends(get_db),
+    current: User = Depends(get_current_user),
+):
+    """圈选/调整计划的用例范围。mode: replace 全量覆盖 / add 追加 / remove 移除 / all 纳入项目全部用例"""
+    plan = db.get(TestPlan, plan_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="计划不存在")
+    require_project_access(plan.project_id, db, current)
+
+    if payload.mode not in ("replace", "add", "remove", "all"):
+        raise HTTPException(status_code=400, detail="mode 只能是 replace/add/remove/all")
+
+    want = set(payload.testcase_ids)
+    if want:
+        valid = set(db.execute(select(TestCase.id).where(TestCase.id.in_(want), TestCase.project_id == plan.project_id)).scalars())
+        bad = sorted(want - valid)
+        if bad:
+            raise HTTPException(status_code=400, detail=f"用例不存在或不属于该项目: {', '.join(map(str, bad))}")
+
+    if payload.mode == "all":
+        want = set(db.execute(select(TestCase.id).where(TestCase.project_id == plan.project_id)).scalars())
+        current_ids = want
+    else:
+        existing = set(
+            db.execute(select(PlanTestCase.testcase_id).where(PlanTestCase.plan_id == plan_id)).scalars()
+        )
+        if payload.mode == "add":
+            current_ids = existing | want
+        elif payload.mode == "remove":
+            current_ids = existing - want
+        else:
+            current_ids = want
+
+    db.execute(PlanTestCase.__table__.delete().where(PlanTestCase.plan_id == plan_id))
+    for cid in sorted(current_ids):
+        db.add(PlanTestCase(plan_id=plan_id, testcase_id=cid, added_by=current.id))
+    db.commit()
+
+    log_op(
+        db, current, "编辑",
+        target=f"计划#{plan_id} {plan.version}",
+        detail=f"用例范围({payload.mode}):{len(current_ids)}条",
+    )
+    return {"plan_id": plan_id, "scoped": bool(current_ids), "total_cases": len(current_ids)}
 
 
 @router.delete("/{plan_id}")
