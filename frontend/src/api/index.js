@@ -64,7 +64,7 @@ export const testcaseApi = {
   get: (id) => request.get(`/testcases/${id}`),
   update: (id, data) => request.put(`/testcases/${id}`, data),
   remove: (id) => request.delete(`/testcases/${id}`),
-  submitReview: (id) => request.post(`/testcases/${id}/submit-review`),
+  submitReview: (id, reviewerId) => request.post(`/testcases/${id}/submit-review`, { reviewer_id: reviewerId ?? null }),
   approve: (id, comment = '') => request.post(`/testcases/${id}/approve`, { comment }),
   reject: (id, comment) => request.post(`/testcases/${id}/reject`, { comment }),
   traceability: (id) => request.get(`/testcases/${id}/traceability`),
@@ -116,6 +116,7 @@ export const importApi = {
 // ---- 成员管理 ----
 export const userApi = {
   list: () => request.get('/users'),
+  options: () => request.get('/users/options'),
   listStaff: (params) => request.get('/users/staff', { params }),
   create: (data) => request.post('/users', data),
   update: (id, data) => request.put(`/users/${id}`, data),
@@ -153,6 +154,7 @@ export const notificationApi = {
   unreadCount: () => request.get('/notifications/unread-count'),
   markRead: (data) => request.post('/notifications/mark-read', data),
   remove: (id) => request.delete(`/notifications/${id}`),
+  scanStage: () => request.post('/notifications/scan-stage'),
 }
 
 // ---- 用例版本 ----

@@ -163,10 +163,12 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { defectApi, integrationApi, projectApi, userApi, testcaseApi } from '../api'
 import { useAuthStore } from '../stores/auth'
 
+const route = useRoute()
 const defects = ref([])
 const projects = ref([])
 const users = ref([])
@@ -257,7 +259,7 @@ const loadProjects = async () => {
 
 const loadUsers = async () => {
   try {
-    users.value = await userApi.list()
+    users.value = await userApi.options()
   } catch (e) { console.error(e) }
 }
 
@@ -373,10 +375,15 @@ const handlePush = async (system) => {
   }
 }
 
-onMounted(() => {
-  loadData()
+onMounted(async () => {
   loadProjects()
   loadUsers()
+  await loadData()
+  // 通知里的"查看详情"带 focus=<缺陷ID>,直接打开来源追溯
+  const focus = Number(route.query.focus)
+  if (focus) {
+    showTrace(defects.value.find((d) => d.id === focus) || { id: focus, title: `缺陷#${focus}` })
+  }
 })
 </script>
 

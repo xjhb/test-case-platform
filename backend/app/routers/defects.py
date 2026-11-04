@@ -7,7 +7,8 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..deps import accessible_project_ids, get_current_user, require_project_access
 from ..logger import log_op
-from ..models import Defect, Notification, Project, TestCase, TestPlan, TestRun, User
+from ..models import Defect, Project, TestCase, TestPlan, TestRun, User
+from ..notify import emit
 from ..schemas import DefectCreate, DefectOut, DefectUpdate
 
 router = APIRouter(prefix="/api/defects", tags=["缺陷管理"], dependencies=[Depends(get_current_user)])
@@ -15,11 +16,26 @@ router = APIRouter(prefix="/api/defects", tags=["缺陷管理"], dependencies=[D
 VALID_SEVERITY = {"致命", "严重", "一般", "提示"}
 VALID_PRIORITY = {"P0", "P1", "P2", "P3"}
 VALID_STATUS = {"新建", "处理中", "已修复", "已验证", "关闭", "重新打开"}
+# 达到这个量级的缺陷才推群机器人,普通缺陷只写站内信
+URGENT_SEVERITY = {"致命", "严重"}
+URGENT_PRIORITY = {"P0", "P1"}
 
 
-def _send_notification(db: Session, user_id: int, ntype: str, title: str, content: str, link: str):
-    n = Notification(user_id=user_id, type=ntype, title=title, content=content, link=link)
-    db.add(n)
+def _is_urgent(d: Defect) -> bool:
+    return d.severity in URGENT_SEVERITY or d.priority in URGENT_PRIORITY
+
+
+def _notify_assignee(db: Session, d: Defect, operator: User, action: str) -> None:
+    if not d.assignee_id or d.assignee_id == operator.id:
+        return
+    who = operator.display_name or operator.username
+    emit(
+        db, [d.assignee_id], "defect_assigned",
+        f"{action}: {d.title}",
+        f"严重程度: {d.severity}, 优先级: {d.priority}, 操作人: {who}",
+        f"/defects?focus={d.id}",
+        broadcast=_is_urgent(d),
+    )
 
 
 @router.get("")
@@ -122,15 +138,7 @@ def create_defect(
     db.refresh(d)
 
     log_op(db, current, "创建", target=f"缺陷#{d.id}", detail=d.title)
-
-    if d.assignee_id and d.assignee_id != current.id:
-        _send_notification(
-            db, d.assignee_id, "defect_assigned",
-            f"你被指派了一个缺陷: {d.title}",
-            f"严重程度: {d.severity}, 优先级: {d.priority}",
-            f"#/defects/{d.id}",
-        )
-        db.commit()
+    _notify_assignee(db, d, current, "你被指派了一个缺陷")
 
     reporter = db.get(User, d.reporter_id)
     assignee = db.get(User, d.assignee_id) if d.assignee_id else None
@@ -181,6 +189,8 @@ def update_defect(
     require_project_access(d.project_id, db, current)
 
     changes = []
+    status_changed_to = None
+    assignee_changed = False
     if body.title is not None:
         d.title = body.title
         changes.append("标题")
@@ -206,20 +216,37 @@ def update_defect(
             d.resolved_at = datetime.now()
         if body.status == "关闭" and not d.closed_at:
             d.closed_at = datetime.now()
+        if body.status != old_status:
+            status_changed_to = body.status
     if body.assignee_id is not None:
         old_assignee = d.assignee_id
         d.assignee_id = body.assignee_id
-        if old_assignee != body.assignee_id and body.assignee_id and body.assignee_id != current.id:
-            _send_notification(
-                db, body.assignee_id, "defect_assigned",
-                f"你被指派了一个缺陷: {d.title}",
-                f"严重程度: {d.severity}, 优先级: {d.priority}",
-                f"#/defects/{d.id}",
-            )
+        if old_assignee != body.assignee_id and body.assignee_id:
+            assignee_changed = True
 
     log_op(db, current, "编辑", target=f"缺陷#{d.id}", detail="; ".join(changes) if changes else "无变更")
     db.commit()
     db.refresh(d)
+
+    who = current.display_name or current.username
+    if assignee_changed:
+        _notify_assignee(db, d, current, "你被指派了一个缺陷")
+    if status_changed_to == "已修复" and d.reporter_id != current.id:
+        emit(
+            db, [d.reporter_id], "defect_verify",
+            f"缺陷已修复,请验证: {d.title}",
+            f"处理人: {who}, 严重程度: {d.severity}, 优先级: {d.priority}",
+            f"/defects?focus={d.id}",
+            broadcast=_is_urgent(d),
+        )
+    elif status_changed_to == "重新打开" and d.assignee_id and d.assignee_id != current.id:
+        emit(
+            db, [d.assignee_id], "defect_verify",
+            f"缺陷被重新打开: {d.title}",
+            f"操作人: {who}, 原因: {d.description[:80] or '未填写'}",
+            f"/defects?focus={d.id}",
+            broadcast=_is_urgent(d),
+        )
 
     reporter = db.get(User, d.reporter_id)
     assignee = db.get(User, d.assignee_id) if d.assignee_id else None

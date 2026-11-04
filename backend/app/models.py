@@ -180,6 +180,7 @@ class SystemConfig(Base):
     default_sit_days: Mapped[int] = mapped_column(default=7)  # SIT默认天数
     default_uat_days: Mapped[int] = mapped_column(default=5)  # UAT默认天数
     default_pre_days: Mapped[int] = mapped_column(default=3)  # PRE默认天数
+    stage_remind_days: Mapped[int] = mapped_column(default=3)  # 阶段到期前提醒天数
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
@@ -249,11 +250,12 @@ class Notification(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)  # 接收人
-    type: Mapped[str] = mapped_column(String(32), index=True)  # defect_assigned / testcase_assigned / stage_expiring / mention
+    type: Mapped[str] = mapped_column(String(32), index=True)  # defect_assigned / defect_verify / review_assigned / review_result / stage_expiring
     title: Mapped[str] = mapped_column(String(255))
     content: Mapped[str] = mapped_column(Text, default="")
     link: Mapped[str] = mapped_column(String(255), default="")  # 前端跳转链接
     is_read: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    push_result: Mapped[str] = mapped_column(String(255), default="")  # 外部通道投递结果,空表示尚未投递或未启用
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), index=True)
 
 

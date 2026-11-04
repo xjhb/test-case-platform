@@ -17,6 +17,7 @@ from sqlalchemy import text
 from . import models  # noqa: F401  确保模型注册
 from .config import settings
 from .database import Base, engine
+from .notify import start_stage_scheduler
 from .routers import auth, automation, defects, imports, integrations, logs, notifications, p2_features, plans, projects, requirements, reports, runs, stats, system, teams, testcases, uploads, users, versions
 from .seed import seed_admin
 
@@ -137,6 +138,12 @@ def migrate():
         # defects 补 run_id
         if not conn.execute(text("SHOW COLUMNS FROM defects LIKE 'run_id'")).fetchone():
             conn.execute(text("ALTER TABLE defects ADD COLUMN run_id INT NULL"))
+        # notifications 补外部通道投递结果
+        if not conn.execute(text("SHOW COLUMNS FROM notifications LIKE 'push_result'")).fetchone():
+            conn.execute(text("ALTER TABLE notifications ADD COLUMN push_result VARCHAR(255) DEFAULT ''"))
+        # system_config 补阶段到期提醒天数
+        if not conn.execute(text("SHOW COLUMNS FROM system_config LIKE 'stage_remind_days'")).fetchone():
+            conn.execute(text("ALTER TABLE system_config ADD COLUMN stage_remind_days INT DEFAULT 3"))
         # 创建 P2 新表
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS project_roles (
@@ -233,6 +240,8 @@ async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     migrate()
     seed_admin()
+    # 阶段到期提醒:启动补一次,之后按周期扫描(单进程部署,重复启动由当日去重兜底)
+    start_stage_scheduler()
     yield
 
 

@@ -52,6 +52,18 @@ def _staff_out(user: User) -> dict:
     }
 
 
+@router.get("/options")
+def list_user_options(
+    db: Session = Depends(get_db),
+    current: User = Depends(get_current_user),
+):
+    """缺陷指派、用例评审等下拉框使用:任何登录用户都能读到在职成员姓名列表"""
+    rows = list(db.execute(
+        select(User).where(User.is_active == True).order_by(User.id.asc())  # noqa: E712
+    ).scalars())
+    return [{"id": u.id, "username": u.username, "display_name": u.display_name or u.username} for u in rows]
+
+
 @router.get("/staff", dependencies=[Depends(require_admin)])
 def list_staff(
     terminal_no: str | None = None,

@@ -1,10 +1,11 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { systemApi } from '../api'
+import { systemApi, notificationApi } from '../api'
 
 const loading = ref(false)
-const form = reactive({ default_sit_days: 7, default_uat_days: 5, default_pre_days: 3 })
+const scanning = ref(false)
+const form = reactive({ default_sit_days: 7, default_uat_days: 5, default_pre_days: 3, stage_remind_days: 3 })
 
 async function load() {
   loading.value = true
@@ -13,6 +14,7 @@ async function load() {
     form.default_sit_days = cfg.default_sit_days
     form.default_uat_days = cfg.default_uat_days
     form.default_pre_days = cfg.default_pre_days
+    form.stage_remind_days = cfg.stage_remind_days ?? 3
   } finally {
     loading.value = false
   }
@@ -27,8 +29,19 @@ async function save() {
     default_sit_days: form.default_sit_days,
     default_uat_days: form.default_uat_days,
     default_pre_days: form.default_pre_days,
+    stage_remind_days: form.stage_remind_days,
   })
   ElMessage.success('已保存,新建计划时自动按此天数设置阶段时间')
+}
+
+async function scanNow() {
+  scanning.value = true
+  try {
+    const res = await notificationApi.scanStage()
+    ElMessage.success(res.message || '扫描完成')
+  } finally {
+    scanning.value = false
+  }
 }
 
 onMounted(load)
@@ -51,8 +64,13 @@ onMounted(load)
           <el-input-number v-model="form.default_pre_days" :min="1" :max="90" :step="1" />
           <span style="margin-left: 12px; color: #909399; font-size: 13px">默认3天</span>
         </el-form-item>
+        <el-form-item label="阶段到期提醒天数">
+          <el-input-number v-model="form.stage_remind_days" :min="0" :max="30" :step="1" />
+          <span style="margin-left: 12px; color: #909399; font-size: 13px">阶段结束前 N 天提醒批次负责人与测试负责人,0 表示关闭</span>
+        </el-form-item>
         <el-form-item>
           <el-button type="primary" @click="save">保存</el-button>
+          <el-button @click="scanNow" :loading="scanning">立即扫描到期提醒</el-button>
         </el-form-item>
       </el-form>
       <el-alert
@@ -60,6 +78,13 @@ onMounted(load)
         :closable="false"
         show-icon
         title="说明:新建测试计划时,自动按此天数设置各阶段起止时间(SIT结束=UAT开始,UAT结束=PRE开始)。单个计划的阶段时间可在测试计划页修改。"
+      />
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        style="margin-top: 8px"
+        title="到期提醒始终写入站内信;配置了邮件或群机器人凭据时同时尽力外部投递(见 外部工具集成 页面)"
       />
     </el-card>
   </div>

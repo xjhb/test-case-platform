@@ -95,7 +95,7 @@
 | GET | `/{id}` | 用例详情 | 项目成员 |
 | PUT | `/{id}` | 更新用例 | 项目成员 |
 | DELETE | `/{id}` | 删除用例 | 项目成员 |
-| POST | `/{id}/submit-review` | 提交评审 | 项目成员 |
+| POST | `/{id}/submit-review` | 提交评审,body 可传 `{"reviewer_id": 12}` 指定评审人(不传则通知测试负责人/项目经理) | 项目成员 |
 | POST | `/{id}/approve` | 批准用例 | 项目成员 |
 | POST | `/{id}/reject` | 驳回用例 | 项目成员 |
 
@@ -251,10 +251,48 @@
 
 | 方法 | 路径 | 说明 | 权限 |
 |------|------|------|------|
-| GET | `` | 通知列表 | 已登录 |
+| GET | `` | 通知列表(分页/筛选,返回 `{total, items}`) | 已登录 |
 | GET | `/unread-count` | 未读数量 | 已登录 |
-| POST | `/mark-read` | 标记已读 | 已登录 |
+| POST | `/mark-read` | 标记已读(传 `ids` 批量,不传则全部) | 已登录 |
+| POST | `/scan-stage` | 立即扫描阶段到期提醒 | Admin |
 | DELETE | `/{id}` | 删除通知 | 已登录 |
+
+### GET /api/notifications (查询参数)
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| is_read | bool | 已读/未读筛选 |
+| type | string | 通知类型(见下表) |
+| page | int | 页码(默认1) |
+| size | int | 每页条数(默认20,最大100) |
+
+### 通知类型与触发点
+
+| 类型 | 触发时机 | 收件人 | 跳转链接 |
+|------|---------|--------|---------|
+| `defect_assigned` | 新建/改派缺陷 | 被指派人(不通知操作人自己) | `/defects?focus={id}` |
+| `defect_verify` | 缺陷置为「已修复」或「重新打开」 | 报告人 / 当前指派人 | `/defects?focus={id}` |
+| `review_assigned` | 用例提交评审 | 指定评审人;未指定则项目上的测试负责人/项目经理 | `/testcases?project_id={pid}&focus={id}` |
+| `review_result` | 用例评审通过或被驳回 | 用例创建人 | `/testcases?project_id={pid}&focus={id}` |
+| `stage_expiring` | SIT/UAT/PRE 结束前 N 天,后端启动时及每 6 小时自动扫描 | 批次负责人 + 测试负责人/项目经理 | `/plans?project_id={pid}&focus={id}&stage={SIT}` |
+
+> 站内信始终写入并随业务事务提交;邮件与群机器人属于外部通道,在后台线程尽力投递,
+> 投递结果只记录到 `push_result` 字段,失败不影响业务接口。
+> 只有 `broadcast=true` 的场景(缺陷严重程度为 致命/严重 或优先级 P0/P1、阶段到期提醒)
+> 才会推送到群机器人,避免群消息刷屏。
+> 同一天同一计划的同一阶段只会产生一条到期提醒,可重复调用 `/scan-stage` 验证幂等。
+
+`POST /api/notifications/scan-stage` 返回:
+
+```json
+{
+  "remind_days": 3,
+  "scanned_plans": 4,
+  "created": 2,
+  "skipped": 2,
+  "message": "扫描 4 个进行中计划,新增 2 条到期提醒"
+}
+```
 
 ---
 
@@ -265,6 +303,7 @@
 | 方法 | 路径 | 说明 | 权限 |
 |------|------|------|------|
 | GET | `` | 用户列表 | Admin |
+| GET | `/options` | 在职成员下拉列表(id/username/display_name),供缺陷指派、用例评审选择 | 已登录 |
 | GET | `/staff` | 外包人员列表 | Admin |
 | GET | `/me/projects` | 我的项目 | 已登录 |
 | POST | `` | 创建用户 | Admin |
@@ -322,6 +361,7 @@
 | default_sit_days | SIT 默认天数 | 7 |
 | default_uat_days | UAT 默认天数 | 5 |
 | default_pre_days | PRE 默认天数 | 3 |
+| stage_remind_days | 阶段结束前 N 天到期提醒,0 表示关闭 | 3 |
 
 ---
 
@@ -447,7 +487,12 @@
 | CI/CD | GitLab CI | `GITLAB_BASE_URL` `GITLAB_TOKEN` |
 | CI/CD | GitHub Actions | `GITHUB_TOKEN` |
 | 回调鉴权 | - | `WEBHOOK_SECRET`(可选) |
+| 通知开关 | - | `NOTIFY_EXTERNAL_ENABLED`(默认开;置 `0` 后站内信照常写入,不再调用邮件/群机器人) |
+| 跳转拼接 | - | `PLATFORM_BASE_URL`(外部消息里的完整链接前缀,可选) |
 | 自动化框架 | Selenium, Playwright, Cypress, JMeter | 通过 `/automation/result` 或 `/api/automation/batch` 回写 |
+
+> `/status` 同时返回 `external_push_enabled`,前端「外部工具集成」页据此显示
+> 「外部投递 已开启 / 已关闭(仅站内信)」。
 
 ---
 

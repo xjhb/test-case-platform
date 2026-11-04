@@ -6,18 +6,38 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..deps import accessible_project_ids, get_current_user, require_project_access
 from ..logger import log_op
-from ..models import Defect, TestCase, TestCaseStep, TestCaseVersion, TestPlan, TestRun, User
+from ..models import Defect, ProjectRole, TestCase, TestCaseStep, TestCaseVersion, TestPlan, TestRun, User
+from ..notify import emit
 from ..schemas import TestCaseCreate, TestCaseOut, TestCaseStepIn, TestCaseStepOut, TestCaseUpdate
 
 router = APIRouter(prefix="/api/testcases", tags=["测试用例"], dependencies=[Depends(get_current_user)])
 
 VALID_PRIORITY = {"P0", "P1", "P2", "P3"}
+
+
+class ReviewSubmit(BaseModel):
+    reviewer_id: int | None = None  # 指定评审人;不传则提醒项目上的测试负责人
+
+
+def _review_pool(db: Session, project_id: int) -> list[int]:
+    """项目上的测试负责人/项目经理,作为未指定评审人时的默认提醒对象"""
+    rows = list(
+        db.execute(
+            select(ProjectRole).where(
+                ProjectRole.project_id == project_id,
+                ProjectRole.role.in_(["manager", "test_lead"]),
+            )
+        ).scalars()
+    )
+    ids = {r.user_id for r in rows}
+    return [i for i in sorted(ids) if i]
 
 
 def _save_version(db: Session, tc: TestCase, user: User, summary: str = ""):
@@ -403,20 +423,42 @@ VALID_REVIEW_STATUS = {"草稿", "评审中", "已批准", "已驳回"}
 
 
 @router.post("/{tcid}/submit-review")
-def submit_review(tcid: int, db: Session = Depends(get_db), current: User = Depends(get_current_user)):
+def submit_review(
+    tcid: int,
+    payload: ReviewSubmit | None = None,
+    db: Session = Depends(get_db),
+    current: User = Depends(get_current_user),
+):
     tc = db.get(TestCase, tcid)
     if not tc:
         raise HTTPException(status_code=404, detail="用例不存在")
     require_project_access(tc.project_id, db, current)
     if tc.review_status not in ("草稿", "已驳回"):
         raise HTTPException(status_code=400, detail=f"当前状态[{tc.review_status}]不允许提交评审,只有草稿或被驳回的用例可以提交评审")
+    reviewer_id = payload.reviewer_id if payload else None
+    if reviewer_id:
+        reviewer = db.get(User, reviewer_id)
+        if not reviewer or not reviewer.is_active:
+            raise HTTPException(status_code=400, detail="评审人不存在或已停用")
+        if reviewer.id == tc.created_by:
+            raise HTTPException(status_code=400, detail="评审人不能是用例编写人")
     tc.review_status = "评审中"
-    tc.reviewer_id = None
+    tc.reviewer_id = reviewer_id
     tc.review_comment = ""
     tc.reviewed_at = None
     db.commit()
     db.refresh(tc)
     log_op(db, current, "提交评审", target=f"用例#{tc.id} {tc.title}")
+
+    # 没有指定评审人时,通知项目上的测试负责人/项目经理,避免评审请求石沉大海
+    targets = [reviewer_id] if reviewer_id else _review_pool(db, tc.project_id)
+    who = current.display_name or current.username
+    emit(
+        db, [t for t in targets if t != current.id], "review_assigned",
+        f"用例待评审: {tc.title}",
+        f"提交人: {who}, 优先级: {tc.priority}",
+        f"/testcases?project_id={tc.project_id}&focus={tc.id}",
+    )
     return tc
 
 
@@ -440,6 +482,13 @@ def approve_testcase(
     db.commit()
     db.refresh(tc)
     log_op(db, current, "批准", target=f"用例#{tc.id} {tc.title}")
+    who = current.display_name or current.username
+    emit(
+        db, [tc.created_by], "review_result",
+        f"用例评审通过: {tc.title}",
+        f"评审人: {who}" + (f", 意见: {comment}" if comment else ""),
+        f"/testcases?project_id={tc.project_id}&focus={tc.id}",
+    )
     return tc
 
 
@@ -466,6 +515,13 @@ def reject_testcase(
     db.commit()
     db.refresh(tc)
     log_op(db, current, "驳回", target=f"用例#{tc.id} {tc.title}", detail=comment[:50])
+    who = current.display_name or current.username
+    emit(
+        db, [tc.created_by], "review_result",
+        f"用例被驳回: {tc.title}",
+        f"评审人: {who}, 意见: {comment}",
+        f"/testcases?project_id={tc.project_id}&focus={tc.id}",
+    )
     return tc
 
 

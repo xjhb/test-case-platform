@@ -296,7 +296,17 @@ onMounted(async () => {
     )
     if (matched) query.project_id = matched.id
   }
-  load()
+  await load()
+  // 通知里的"查看详情"带 focus=<批次ID>,直接打开该批次的阶段时间
+  const focusId = Number(route.query.focus)
+  if (focusId) {
+    const row = plans.value.find((p) => p.id === focusId)
+    if (row) {
+      openStageTimes(row)
+    } else {
+      ElMessage.warning('当前筛选下未找到该批次,请确认批次是否已完成或属于其他项目')
+    }
+  }
 })
 
 // ---- 阶段时间编辑 ----

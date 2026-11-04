@@ -416,6 +416,7 @@ class NotificationOut(BaseModel):
     content: str
     link: str
     is_read: bool
+    push_result: str = ""
     created_at: datetime
 
 

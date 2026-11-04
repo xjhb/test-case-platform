@@ -694,6 +694,7 @@ def integration_status(
         "channels": items,
         "webhook_secret_configured": bool(settings.webhook_secret),
         "platform_base_url_configured": bool(settings.platform_base_url),
+        "external_push_enabled": settings.notify_external_enabled,
         "config_source": "nacos" if settings.nacos_server else "env",
         "hint": "凭据请在 backend/.env 或 Nacos 配置(testmanage)中填写,保存后重启后端生效",
     }

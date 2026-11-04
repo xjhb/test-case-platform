@@ -2,7 +2,7 @@
 import { ref, reactive, onMounted, onBeforeUnmount, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { projectApi, testcaseApi, runApi, uploadApi, planApi, importApi, testcaseExportUrl, p2Api } from '../api'
+import { projectApi, testcaseApi, runApi, uploadApi, planApi, importApi, testcaseExportUrl, p2Api, userApi } from '../api'
 import { useAuthStore } from '../stores/auth'
 
 const route = useRoute()
@@ -348,10 +348,31 @@ const rejectVisible = ref(false)
 const rejectForm = reactive({ testcase_id: null, comment: '' })
 const rejectTitle = ref('')
 
-async function submitReview(row) {
-  await ElMessageBox.confirm(`确定将用例「${row.title}」提交评审?`, '提示', { type: 'info' })
-  await testcaseApi.submitReview(row.id)
-  ElMessage.success('已提交评审')
+const reviewVisible = ref(false)
+const reviewForm = reactive({ testcase_id: null, title: '', reviewer_id: null })
+const memberOptions = ref([])
+
+async function loadMembers() {
+  if (memberOptions.value.length) return
+  try {
+    memberOptions.value = await userApi.options()
+  } catch (e) {
+    memberOptions.value = []
+  }
+}
+
+function submitReview(row) {
+  reviewForm.testcase_id = row.id
+  reviewForm.title = row.title
+  reviewForm.reviewer_id = null
+  reviewVisible.value = true
+  loadMembers()
+}
+
+async function confirmSubmitReview() {
+  await testcaseApi.submitReview(reviewForm.testcase_id, reviewForm.reviewer_id)
+  ElMessage.success(reviewForm.reviewer_id ? '已提交评审,评审人会收到通知' : '已提交评审')
+  reviewVisible.value = false
   load()
 }
 
@@ -844,6 +865,16 @@ onMounted(async () => {
   loadFolders()
   loadTags()
   loadCustomFields()
+  // 通知里的"查看详情"带 focus=<用例ID>,直接打开追溯视图
+  if (route.query.focus) {
+    const tcId = Number(route.query.focus)
+    try {
+      const tc = await testcaseApi.get(tcId)
+      openTrace({ id: tc.id, title: tc.title })
+    } catch (e) {
+      ElMessage.warning('用例不存在或无权访问')
+    }
+  }
 })
 
 onBeforeUnmount(() => {
@@ -1462,6 +1493,24 @@ onBeforeUnmount(() => {
       <div v-loading="importLoading" style="text-align: center; color: #909399; margin-top: 8px">
         {{ importLoading ? '导入中...' : '' }}
       </div>
+    </el-dialog>
+
+    <!-- 提交评审对话框 -->
+    <el-dialog v-model="reviewVisible" :title="`提交评审 - ${reviewForm.title}`" width="480px">
+      <el-form label-width="80px">
+        <el-form-item label="评审人">
+          <el-select v-model="reviewForm.reviewer_id" placeholder="选择评审人(可不选)" filterable clearable style="width: 100%">
+            <el-option v-for="u in memberOptions" :key="u.id" :label="u.display_name" :value="u.id" />
+          </el-select>
+          <div style="color: #909399; font-size: 12px; margin-top: 4px">
+            不选择评审人时,提醒项目上分配了测试负责人/项目经理的成员
+          </div>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="reviewVisible = false">取消</el-button>
+        <el-button type="primary" @click="confirmSubmitReview">提交评审</el-button>
+      </template>
     </el-dialog>
 
     <!-- 驳回对话框 -->

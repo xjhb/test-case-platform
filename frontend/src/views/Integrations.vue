@@ -7,7 +7,7 @@ import { useAuthStore } from '../stores/auth'
 const auth = useAuthStore()
 
 const loading = ref(false)
-const status = ref({ channels: [], webhook_secret_configured: false, platform_base_url_configured: false, config_source: 'env', hint: '' })
+const status = ref({ channels: [], webhook_secret_configured: false, platform_base_url_configured: false, external_push_enabled: true, config_source: 'env', hint: '' })
 const testing = ref('')
 
 const events = ref([])
@@ -89,6 +89,9 @@ onMounted(() => {
       </el-tag>
       <el-tag size="small" :type="status.platform_base_url_configured ? 'success' : 'info'">
         平台外访地址 {{ status.platform_base_url_configured ? '已配置' : '未配置' }}
+      </el-tag>
+      <el-tag size="small" :type="status.external_push_enabled ? 'success' : 'warning'">
+        外部投递 {{ status.external_push_enabled ? '已开启' : '已关闭(仅站内信)' }}
       </el-tag>
     </div>
 

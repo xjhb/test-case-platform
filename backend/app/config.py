@@ -52,6 +52,8 @@ class Settings(BaseSettings):
     webhook_secret: str = ""
     # 本平台对外地址,用于通知里的跳转链接
     platform_base_url: str = ""
+    # 关闭后站内信照写,不再调用邮件/群机器人等外部通道
+    notify_external_enabled: bool = True
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
     
