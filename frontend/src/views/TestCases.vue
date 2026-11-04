@@ -592,6 +592,11 @@ async function onHistoryExpand(row) {
 
 const stageTagType = (s) => ({ SIT: 'primary', UAT: 'warning', PRE: 'danger' }[s] || 'info')
 const stageLabel = (s) => ({ SIT: 'SIT', UAT: 'UAT', PRE: '预发版' }[s] || s)
+const formatDuration = (sec) => {
+  if (sec === null || sec === undefined) return '-'
+  if (sec < 60) return `${sec}s`
+  return `${Math.floor(sec / 60)}m${sec % 60}s`
+}
 
 // ---- 追溯视图 ----
 const traceVisible = ref(false)
@@ -1318,6 +1323,9 @@ onBeforeUnmount(() => {
           <template #default="{ row }">
             <el-tag :type="statusTagType(row.status)" size="small">{{ row.status }}</el-tag>
           </template>
+        </el-table-column>
+        <el-table-column label="耗时" width="90">
+          <template #default="{ row }">{{ formatDuration(row.duration_seconds) }}</template>
         </el-table-column>
         <el-table-column label="截图" width="80">
           <template #default="{ row }">

@@ -417,26 +417,37 @@
 
 | 方法 | 路径 | 说明 | 权限 |
 |------|------|------|------|
-| POST | `/webhook` | 通用 Webhook 接收 | 已登录 |
-| POST | `/defect/sync` | 同步外部缺陷 | 已登录 |
-| POST | `/defect/push` | 推送缺陷到外部 | 已登录 |
-| POST | `/notify` | 发送通知 | 已登录 |
-| POST | `/automation/result` | 上报自动化结果 | 已登录 |
-| POST | `/cicd/trigger` | 触发 CI/CD | 已登录 |
-| GET | `/config/list` | 集成配置列表 | 已登录 |
-| POST | `/config` | 创建集成配置 | Admin |
-| PUT | `/config/{id}` | 更新集成配置 | Admin |
-| DELETE | `/config/{id}` | 删除集成配置 | Admin |
+| POST | `/webhook` | 接收外部回调,原始事件先落库再处理 | 平台登录令牌,或配置 `WEBHOOK_SECRET` 后用 `X-Webhook-Token` |
+| GET | `/webhook-events` | 最近回调事件与处理结果 | 已登录 |
+| POST | `/defect/sync` | 外部缺陷 upsert 到本平台(外部系统+外部ID 为唯一键) | 已登录 |
+| POST | `/defect/{id}/push` | 推送本平台缺陷到 Jira/禅道 建工单 | 已登录 |
+| GET | `/defect/{id}/links` | 缺陷已关联的外部工单 | 已登录 |
+| POST | `/notify` | 发送到 钉钉/企业微信/飞书/邮件 | 已登录 |
+| POST | `/automation/result` | 上报单条自动化结果(含耗时) | 已登录 |
+| POST | `/cicd/trigger` | 触发 Jenkins/GitLab CI/GitHub Actions | 已登录 |
+| GET | `/status` | 各通道是否已配置凭据(只返回变量名,不返回值) | 已登录 |
+| POST | `/self-test` | 通道连通性自检 | Admin |
+
+> 集成凭据一律来自 `backend/.env` 或 Nacos,不提供在线录入。
+> 未配置凭据的通道调用写接口返回 **503**,detail 中列出缺失的变量名;
+> 远端不可达或返回错误返回 **502**。自检通道:邮件/CI/缺陷系统为只读探测,
+> 钉钉/企业微信/飞书没有只读接口,自检会真实推送一条测试消息。
 
 ### 支持的外部系统
 
-| 类型 | 系统 |
-|------|------|
-| 缺陷跟踪 | Jira, 禅道 |
-| 通知渠道 | 钉钉, 企业微信, 飞书, 邮件 |
-| CI/CD | Jenkins, GitLab CI, GitHub Actions |
-| 自动化框架 | Selenium, Playwright, Cypress, JMeter |
-| 代码仓库 | GitLab, GitHub |
+| 类型 | 系统 | 所需配置项 |
+|------|------|-----------|
+| 缺陷跟踪 | Jira | `JIRA_BASE_URL` `JIRA_USER` `JIRA_TOKEN` `JIRA_PROJECT_KEY` |
+| 缺陷跟踪 | 禅道 | `ZENTAO_BASE_URL` `ZENTAO_ACCOUNT` `ZENTAO_PASSWORD` `ZENTAO_PRODUCT_ID` |
+| 通知渠道 | 邮件 | `SMTP_HOST` `SMTP_USER` `SMTP_PASSWORD`(可选 `SMTP_PORT` `SMTP_FROM` `SMTP_SSL`) |
+| 通知渠道 | 钉钉 | `DINGTALK_WEBHOOK_URL`(可选 `DINGTALK_SECRET` 加签) |
+| 通知渠道 | 企业微信 | `WECOM_WEBHOOK_URL` |
+| 通知渠道 | 飞书 | `FEISHU_WEBHOOK_URL` |
+| CI/CD | Jenkins | `JENKINS_BASE_URL` `JENKINS_USER` `JENKINS_TOKEN` |
+| CI/CD | GitLab CI | `GITLAB_BASE_URL` `GITLAB_TOKEN` |
+| CI/CD | GitHub Actions | `GITHUB_TOKEN` |
+| 回调鉴权 | - | `WEBHOOK_SECRET`(可选) |
+| 自动化框架 | Selenium, Playwright, Cypress, JMeter | 通过 `/automation/result` 或 `/api/automation/batch` 回写 |
 
 ---
 
@@ -448,6 +459,10 @@
 |------|------|------|------|
 | POST | `/batch` | 批量提交自动化结果 | 已登录 |
 | GET | `/guide` | 集成指南 | 已登录 |
+
+> 回写前必须先把用例纳入计划范围(`测试计划 → 用例范围`),
+> 未圈选的用例会计入返回的 `errors`,不会生成执行记录。
+> 未圈选任何用例的历史计划按"项目全部用例"处理。
 
 ### POST /api/automation/batch
 

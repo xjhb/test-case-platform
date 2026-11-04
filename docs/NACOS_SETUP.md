@@ -47,9 +47,12 @@ sh startup.sh -m standalone
 
 ### 验证启动
 
-访问控制台: http://localhost:8848/nacos
+访问控制台: http://<your-server>:8848/nacos
 - 默认账号: nacos
 - 默认密码: nacos
+
+> 出厂默认账号仅用于本机首次验证，正式环境必须先改掉默认密码并开启鉴权，
+> 再把改后的账号密码写入 `backend/.env`（不要提交到代码库）。
 
 ## 第四步：配置 .env
 
@@ -57,19 +60,20 @@ sh startup.sh -m standalone
 
 ```env
 # Nacos 配置
-NACOS_SERVER=localhost:8848
+NACOS_SERVER=<your-server>:8848
 NACOS_NAMESPACE=
 NACOS_DATA_ID=testmanage
 NACOS_GROUP=DEFAULT_GROUP
-NACOS_USERNAME=nacos
-NACOS_PASSWORD=nacos
+# 换成你自己 Nacos 的账号;默认账号密码只用于本机首次验证,不要提交真实值
+NACOS_USERNAME=<your-nacos-user>
+NACOS_PASSWORD=<your-nacos-password>
 
 # 其他配置（首次迁移时需要）
-DATABASE_URL=mysql+pymysql://root:your_password@localhost:3306/testmanage?charset=utf8mb4
+DATABASE_URL=mysql+pymysql://root:your_password@<your-db-server>:3306/testmanage?charset=utf8mb4
 SECRET_KEY=your-secret-key
 ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=1440
-CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+CORS_ORIGINS=http://<your-frontend-host>:5173
 ```
 
 ## 第五步：迁移配置到 Nacos
@@ -85,7 +89,7 @@ python scripts/migrate_to_nacos.py
 
 1. 在 Nacos 控制台 → 配置管理 → 配置列表 中查看 `testmanage` 配置
 2. 启动后端: `cd backend && python -m uvicorn app.main:app --reload`
-3. 查看控制台输出，应显示 `✅ 已从 Nacos 加载配置: testmanage`
+3. 查看控制台输出，应显示 `[OK] 已从 Nacos 加载配置: testmanage, 覆盖 N 项`
 
 ## 配置格式说明
 
@@ -93,11 +97,11 @@ Nacos 中存储的配置为 JSON 格式:
 
 ```json
 {
-  "database_url": "mysql+pymysql://user:pass@localhost:3306/testmanage?charset=utf8mb4",
+  "database_url": "mysql+pymysql://user:pass@<your-db-server>:3306/testmanage?charset=utf8mb4",
   "secret_key": "your-jwt-secret-key",
   "algorithm": "HS256",
   "access_token_expire_minutes": 1440,
-  "cors_origins": "http://localhost:5173,http://127.0.0.1:5173"
+  "cors_origins": "http://<your-frontend-host>:5173"
 }
 ```
 

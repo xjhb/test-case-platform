@@ -1,232 +1,163 @@
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { computed, onMounted, ref } from 'vue'
+import { ElMessage } from 'element-plus'
 import { integrationApi } from '../api'
+import { useAuthStore } from '../stores/auth'
+
+const auth = useAuthStore()
 
 const loading = ref(false)
-const configs = ref([])
+const status = ref({ channels: [], webhook_secret_configured: false, platform_base_url_configured: false, config_source: 'env', hint: '' })
+const testing = ref('')
 
-const dialogVisible = ref(false)
-const isEdit = ref(false)
-const formRef = ref()
-const form = reactive({
-  id: null,
-  name: '',
-  type: '',
-  system: '',
-  enabled: true,
-  config: {},
+const events = ref([])
+const eventsLoading = ref(false)
+
+const KIND_LABELS = { notification: '通知渠道', cicd: 'CI/CD', issue: '缺陷系统' }
+
+const groups = computed(() => {
+  const out = []
+  for (const kind of ['notification', 'cicd', 'issue']) {
+    const items = status.value.channels.filter((c) => c.kind === kind)
+    if (items.length) out.push({ kind, label: KIND_LABELS[kind], items })
+  }
+  return out
 })
 
-const rules = {
-  name: [{ required: true, message: '请输入集成名称', trigger: 'blur' }],
-  type: [{ required: true, message: '请选择集成类型', trigger: 'change' }],
-  system: [{ required: true, message: '请选择目标系统', trigger: 'change' }],
-}
-
-const INTEGRATION_TYPES = [
-  { label: '缺陷跟踪', value: 'defect_tracking' },
-  { label: '通知渠道', value: 'notification' },
-  { label: 'CI/CD', value: 'cicd' },
-  { label: '自动化测试', value: 'automation' },
-  { label: '代码仓库', value: 'code_repository' },
-]
-
-const SYSTEMS = {
-  defect_tracking: [
-    { label: 'Jira', value: 'jira' },
-    { label: '禅道', value: 'zentao' },
-    { label: 'Tapd', value: 'tapd' },
-  ],
-  notification: [
-    { label: '钉钉', value: 'dingtalk' },
-    { label: '企业微信', value: 'wecom' },
-    { label: '飞书', value: 'feishu' },
-    { label: '邮件', value: 'email' },
-  ],
-  cicd: [
-    { label: 'Jenkins', value: 'jenkins' },
-    { label: 'GitLab CI', value: 'gitlab_ci' },
-    { label: 'GitHub Actions', value: 'github_actions' },
-  ],
-  automation: [
-    { label: 'Selenium', value: 'selenium' },
-    { label: 'Playwright', value: 'playwright' },
-    { label: 'Cypress', value: 'cypress' },
-    { label: 'JMeter', value: 'jmeter' },
-  ],
-  code_repository: [
-    { label: 'GitLab', value: 'gitlab' },
-    { label: 'GitHub', value: 'github' },
-    { label: 'Bitbucket', value: 'bitbucket' },
-  ],
-}
+const configuredCount = computed(() => status.value.channels.filter((c) => c.configured).length)
 
 async function load() {
   loading.value = true
   try {
-    configs.value = await integrationApi.listConfigs()
-  } catch (e) {
-    configs.value = []
+    status.value = await integrationApi.status()
   } finally {
     loading.value = false
   }
 }
 
-function resetForm() {
-  form.id = null
-  form.name = ''
-  form.type = ''
-  form.system = ''
-  form.enabled = true
-  form.config = {}
-}
-
-function openCreate() {
-  isEdit.value = false
-  resetForm()
-  dialogVisible.value = true
-}
-
-function openEdit(row) {
-  isEdit.value = true
-  Object.assign(form, row)
-  dialogVisible.value = true
-}
-
-async function submit() {
-  await formRef.value.validate()
-  
-  if (isEdit.value) {
-    await integrationApi.updateConfig(form.id, form)
-    ElMessage.success('修改成功')
-  } else {
-    await integrationApi.createConfig(form)
-    ElMessage.success('创建成功')
+async function loadEvents() {
+  eventsLoading.value = true
+  try {
+    events.value = await integrationApi.webhookEvents(30)
+  } finally {
+    eventsLoading.value = false
   }
-  
-  dialogVisible.value = false
-  load()
 }
 
-async function remove(row) {
-  await ElMessageBox.confirm(`确定删除集成「${row.name}」?`, '提示', { type: 'warning' })
-  await integrationApi.deleteConfig(row.id)
-  ElMessage.success('已删除')
-  load()
-}
-
-async function toggleEnabled(row) {
-  await integrationApi.updateConfig(row.id, { enabled: !row.enabled })
-  ElMessage.success(row.enabled ? '已启用' : '已禁用')
-  load()
-}
-
-function getTypeLabel(type) {
-  return INTEGRATION_TYPES.find(t => t.value === type)?.label || type
-}
-
-function getTypeTagType(type) {
-  const map = {
-    defect_tracking: 'danger',
-    notification: 'warning',
-    cicd: 'primary',
-    automation: 'success',
-    code_repository: 'info',
+async function runSelfTest(row) {
+  testing.value = row.name
+  try {
+    const res = await integrationApi.selfTest(row.name)
+    ElMessage.success(`${row.label}: ${res.message || '连通性校验通过'}`)
+  } catch (e) {
+    // 拦截器已弹出后端 detail,这里只负责刷新状态;不再重复提示
+  } finally {
+    testing.value = ''
+    await load()
   }
-  return map[type] || 'info'
 }
 
-function getSystemLabel(system, type) {
-  const systems = SYSTEMS[type] || []
-  return systems.find(s => s.value === system)?.label || system
-}
-
-onMounted(load)
+onMounted(() => {
+  load()
+  loadEvents()
+})
 </script>
 
 <template>
   <div>
     <div class="toolbar">
-      <el-button type="primary" @click="openCreate">
-        <el-icon><Plus /></el-icon>新建集成
-      </el-button>
       <el-button @click="load">刷新</el-button>
+      <el-button @click="loadEvents">刷新回调记录</el-button>
     </div>
 
     <el-alert
-      title="外部集成配置"
-      description="配置与外部工具(Jira/禅道/钉钉/Jenkins等)的集成,实现数据同步和自动化流程"
+      title="外部集成凭据只来自 backend/.env 或 Nacos"
+      :description="status.hint || '本页只做只读展示与连通性自检,不提供在线改凭据'"
       type="info"
       :closable="false"
       show-icon
       style="margin-bottom: 16px"
     />
 
-    <el-table v-loading="loading" :data="configs" border stripe>
-      <el-table-column prop="id" label="ID" width="60" />
-      <el-table-column prop="name" label="集成名称" min-width="160" />
-      <el-table-column label="类型" width="120">
+    <div class="summary">
+      <span>已接通 {{ configuredCount }} / {{ status.channels.length }} 个通道</span>
+      <el-tag size="small" :type="status.config_source === 'nacos' ? 'success' : 'info'">
+        配置来源: {{ status.config_source === 'nacos' ? 'Nacos' : '本地 .env' }}
+      </el-tag>
+      <el-tag size="small" :type="status.webhook_secret_configured ? 'success' : 'warning'">
+        回调密钥 {{ status.webhook_secret_configured ? '已配置' : '未配置' }}
+      </el-tag>
+      <el-tag size="small" :type="status.platform_base_url_configured ? 'success' : 'info'">
+        平台外访地址 {{ status.platform_base_url_configured ? '已配置' : '未配置' }}
+      </el-tag>
+    </div>
+
+    <div v-loading="loading">
+      <div v-for="group in groups" :key="group.kind" class="group">
+        <h3>{{ group.label }}</h3>
+        <el-table :data="group.items" border>
+          <el-table-column prop="label" label="通道" width="180" />
+          <el-table-column label="状态" width="110">
+            <template #default="{ row }">
+              <el-tag :type="row.configured ? 'success' : 'info'" size="small">
+                {{ row.configured ? '已配置' : '未配置' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="缺失的配置项">
+            <template #default="{ row }">
+              <span v-if="row.configured" class="muted">-</span>
+              <el-tag v-for="k in row.missing_keys" :key="k" size="small" type="warning" class="key-tag">{{ k }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="140" align="center">
+            <template #default="{ row }">
+              <el-button
+                v-if="row.has_probe && auth.role === 'admin'"
+                size="small"
+                :type="row.configured ? 'primary' : 'info'"
+                :disabled="!row.configured"
+                :loading="testing === row.name"
+                @click="runSelfTest(row)"
+              >
+                连通性自检
+              </el-button>
+              <span v-else class="muted">-</span>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+    </div>
+
+    <el-alert
+      v-if="auth.role === 'admin'"
+      title="钉钉/企业微信/飞书的自检会真实推送一条测试消息到群里"
+      type="warning"
+      :closable="false"
+      show-icon
+      style="margin: 16px 0"
+    />
+
+    <h3>最近回调事件</h3>
+    <el-table v-loading="eventsLoading" :data="events" border empty-text="暂无回调记录">
+      <el-table-column prop="source" label="来源" width="110" />
+      <el-table-column prop="event_type" label="事件" width="150" />
+      <el-table-column prop="external_key" label="外部主键" width="140" />
+      <el-table-column label="处理结果" width="120">
         <template #default="{ row }">
-          <el-tag :type="getTypeTagType(row.type)" size="small">{{ getTypeLabel(row.type) }}</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column label="目标系统" width="120">
-        <template #default="{ row }">{{ getSystemLabel(row.system, row.type) }}</template>
-      </el-table-column>
-      <el-table-column label="状态" width="100">
-        <template #default="{ row }">
-          <el-tag :type="row.enabled ? 'success' : 'info'" size="small">
-            {{ row.enabled ? '已启用' : '已禁用' }}
+          <el-tag
+            size="small"
+            :type="row.handle_result === '处理失败' || row.handle_result === '未识别' ? 'danger' : row.handle_result === '已忽略' ? 'info' : 'success'"
+          >
+            {{ row.handle_result }}
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="180" fixed="right">
-        <template #default="{ row }">
-          <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
-          <el-button link :type="row.enabled ? 'warning' : 'success'" @click="toggleEnabled(row)">
-            {{ row.enabled ? '禁用' : '启用' }}
-          </el-button>
-          <el-button link type="danger" @click="remove(row)">删除</el-button>
-        </template>
+      <el-table-column prop="handle_note" label="说明" min-width="240" show-overflow-tooltip />
+      <el-table-column label="接收时间" width="180">
+        <template #default="{ row }">{{ new Date(row.received_at).toLocaleString() }}</template>
       </el-table-column>
     </el-table>
-
-    <el-dialog v-model="dialogVisible" :title="isEdit ? '编辑集成' : '新建集成'" width="600px">
-      <el-form ref="formRef" :model="form" :rules="rules" label-width="100px">
-        <el-form-item label="集成名称" prop="name">
-          <el-input v-model="form.name" placeholder="例如:Jira缺陷同步" />
-        </el-form-item>
-        <el-form-item label="集成类型" prop="type">
-          <el-select v-model="form.type" placeholder="选择类型" style="width: 100%" @change="form.system = ''">
-            <el-option v-for="t in INTEGRATION_TYPES" :key="t.value" :label="t.label" :value="t.value" />
-          </el-select>
-        </el-form-item>
-        <el-form-item v-if="form.type" label="目标系统" prop="system">
-          <el-select v-model="form.system" placeholder="选择系统" style="width: 100%">
-            <el-option v-for="s in SYSTEMS[form.type]" :key="s.value" :label="s.label" :value="s.value" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="启用状态">
-          <el-switch v-model="form.enabled" />
-        </el-form-item>
-        <el-form-item label="配置参数">
-          <el-input
-            v-model="form.config"
-            type="textarea"
-            :rows="6"
-            placeholder='JSON 格式,例如:{"api_url":"https://jira.example.com","token":"xxx"}'
-          />
-          <div style="color: #909399; font-size: 12px; margin-top: 4px">
-            注意:实际使用时需要解析为 JSON 对象
-          </div>
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="submit">保存</el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
@@ -235,5 +166,26 @@ onMounted(load)
   margin-bottom: 16px;
   display: flex;
   gap: 10px;
+}
+.summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  font-weight: 600;
+}
+.group {
+  margin-bottom: 20px;
+}
+.group h3,
+h3 {
+  margin: 18px 0 10px;
+  font-size: 15px;
+}
+.key-tag {
+  margin-right: 6px;
+}
+.muted {
+  color: #909399;
 }
 </style>

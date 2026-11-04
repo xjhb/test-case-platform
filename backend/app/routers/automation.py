@@ -8,6 +8,7 @@ from ..database import get_db
 from ..deps import get_current_user
 from ..logger import log_op
 from ..models import TestCase, TestPlan, TestRun, User
+from ..scope import in_scope
 
 router = APIRouter(prefix="/api/automation", tags=["自动化集成"], dependencies=[Depends(get_current_user)])
 
@@ -75,6 +76,11 @@ def batch_submit_results(
                 failed_count += 1
                 continue
 
+            if not in_scope(db, plan, tc.id):
+                errors.append(f"用例#{item.testcase_id}: 未纳入计划#{plan.id}的用例范围")
+                failed_count += 1
+                continue
+
             executed_at = datetime.now()
             if item.executed_at:
                 try:
@@ -97,6 +103,7 @@ def batch_submit_results(
                 screenshot=item.screenshot,
                 executed_by=current.id,
                 executed_at=executed_at,
+                duration_seconds=item.duration_seconds,
             )
             db.add(run)
             success_count += 1

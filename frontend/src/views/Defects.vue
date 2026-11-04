@@ -136,7 +136,23 @@
             </template>
             <span v-else style="color: #c0c4cc">未关联计划</span>
           </el-descriptions-item>
+          <el-descriptions-item label="外部工单">
+            <template v-if="externalLinks.length">
+              <div v-for="l in externalLinks" :key="l.id" class="ext-link">
+                <el-tag size="small">{{ l.system }}</el-tag>
+                <span style="margin-left: 6px">{{ l.external_id }}</span>
+                <el-tag size="small" type="info" style="margin-left: 6px">{{ l.synced_status || '-' }}</el-tag>
+                <a v-if="l.external_url" :href="l.external_url" target="_blank" rel="noopener" style="margin-left: 6px">打开</a>
+              </div>
+            </template>
+            <span v-else style="color: #c0c4cc">未推送</span>
+          </el-descriptions-item>
         </el-descriptions>
+        <div class="ext-actions">
+          <span style="color: #909399; font-size: 12px">推送到外部系统需先在「外部工具集成」页面完成凭据配置;未配置时接口返回 503 并列出缺失项。</span>
+          <el-button size="small" :loading="pushing === 'jira'" @click="handlePush('jira')">推送到 Jira</el-button>
+          <el-button size="small" :loading="pushing === 'zentao'" @click="handlePush('zentao')">推送到禅道</el-button>
+        </div>
       </div>
       <template #footer>
         <el-button @click="traceVisible = false">关闭</el-button>
@@ -146,9 +162,10 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { defectApi, projectApi, userApi, testcaseApi } from '../api'
+import { defectApi, integrationApi, projectApi, userApi, testcaseApi } from '../api'
+import { useAuthStore } from '../stores/auth'
 
 const defects = ref([])
 const projects = ref([])
@@ -160,7 +177,8 @@ const isEdit = ref(false)
 const page = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
-const role = ref(localStorage.getItem('role') || 'member')
+const auth = useAuthStore()
+const role = computed(() => auth.role)
 
 const statusOptions = ['新建', '处理中', '已修复', '已验证', '关闭', '重新打开']
 const severityOptions = ['致命', '严重', '一般', '提示']
@@ -319,19 +337,39 @@ const traceVisible = ref(false)
 const traceLoading = ref(false)
 const traceTitle = ref('')
 const traceData = ref({ testcase: null, run: null, plan: null })
+const traceRow = ref(null)
+const externalLinks = ref([])
+const pushing = ref('')
 
 const tcStatusType = (s) => ({ 未执行: 'info', 通过: 'success', 失败: 'danger', 阻塞: 'warning' }[s] || 'info')
 
 const showTrace = async (row) => {
   traceTitle.value = `缺陷来源 - ${row.title}`
+  traceRow.value = row
+  externalLinks.value = []
   traceVisible.value = true
   traceLoading.value = true
   try {
     traceData.value = await defectApi.traceability(row.id)
+    externalLinks.value = await integrationApi.defectLinks(row.id)
   } catch (e) {
     console.error(e)
   } finally {
     traceLoading.value = false
+  }
+}
+
+const handlePush = async (system) => {
+  if (!traceRow.value) return
+  pushing.value = system
+  try {
+    const res = await integrationApi.pushDefect(traceRow.value.id, system)
+    ElMessage.success(res.message || `已推送到 ${system}`)
+    externalLinks.value = await integrationApi.defectLinks(traceRow.value.id)
+  } catch (e) {
+    // 拦截器已提示后端 detail(未配置 503 / 远端失败 502),这里不再重复弹
+  } finally {
+    pushing.value = ''
   }
 }
 
@@ -365,5 +403,17 @@ onMounted(() => {
 .pagination {
   margin-top: 16px;
   justify-content: flex-end;
+}
+.ext-link {
+  display: flex;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.ext-actions {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 </style>

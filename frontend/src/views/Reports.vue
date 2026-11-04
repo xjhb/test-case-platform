@@ -132,6 +132,7 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { reportApi, projectApi, planApi } from '../api'
+import { useAuthStore } from '../stores/auth'
 
 const reports = ref([])
 const projects = ref([])
@@ -142,7 +143,8 @@ const generateDialogVisible = ref(false)
 const viewDialogVisible = ref(false)
 const currentReport = ref(null)
 const reportData = ref(null)
-const role = ref(localStorage.getItem('role') || 'member')
+const auth = useAuthStore()
+const role = computed(() => auth.role)
 
 const filters = reactive({ project_id: null, plan_id: null })
 const generateForm = reactive({ project_id: null, plan_id: null, stage: 'SIT' })

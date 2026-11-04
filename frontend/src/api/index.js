@@ -260,27 +260,28 @@ export const p2Api = {
 
 // ---- 外部集成 ----
 export const integrationApi = {
+  // 通道配置状态与连通性自检
+  status: () => request.get('/integrations/status'),
+  selfTest: (target) => request.post('/integrations/self-test', { target }),
+
   // Webhook
   receiveWebhook: (data) => request.post('/integrations/webhook', data),
-  
+  webhookEvents: (limit = 50) => request.get('/integrations/webhook-events', { params: { limit } }),
+
   // 缺陷同步
   syncDefect: (data) => request.post('/integrations/defect/sync', data),
-  pushDefect: (defectId, targetSystem) => request.post(`/integrations/defect/push?target_system=${targetSystem}`, null),
-  
+  pushDefect: (defectId, targetSystem) =>
+    request.post(`/integrations/defect/${defectId}/push`, null, { params: { target_system: targetSystem } }),
+  defectLinks: (defectId) => request.get(`/integrations/defect/${defectId}/links`),
+
   // 通知
   sendNotification: (data) => request.post('/integrations/notify', data),
-  
+
   // 自动化测试
   reportAutomationResult: (data) => request.post('/integrations/automation/result', data),
-  
+
   // CI/CD
   triggerPipeline: (data) => request.post('/integrations/cicd/trigger', data),
-  
-  // 配置管理
-  listConfigs: () => request.get('/integrations/config/list'),
-  createConfig: (data) => request.post('/integrations/config', data),
-  updateConfig: (configId, data) => request.put(`/integrations/config/${configId}`, data),
-  deleteConfig: (configId) => request.delete(`/integrations/config/${configId}`),
 }
 
 // ---- 测试用例导出(浏览器直接下载,需手动带 token) ----

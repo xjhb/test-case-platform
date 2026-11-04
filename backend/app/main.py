@@ -131,6 +131,9 @@ def migrate():
         # testruns 补 round_id
         if not conn.execute(text("SHOW COLUMNS FROM testruns LIKE 'round_id'")).fetchone():
             conn.execute(text("ALTER TABLE testruns ADD COLUMN round_id INT NULL"))
+        # testruns 补自动化执行耗时
+        if not conn.execute(text("SHOW COLUMNS FROM testruns LIKE 'duration_seconds'")).fetchone():
+            conn.execute(text("ALTER TABLE testruns ADD COLUMN duration_seconds INT NULL"))
         # defects 补 run_id
         if not conn.execute(text("SHOW COLUMNS FROM defects LIKE 'run_id'")).fetchone():
             conn.execute(text("ALTER TABLE defects ADD COLUMN run_id INT NULL"))

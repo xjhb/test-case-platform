@@ -18,6 +18,41 @@ class Settings(BaseSettings):
     nacos_username: str = ""
     nacos_password: str = ""
 
+    # ---- 外部集成凭据(全部可选,未配置的通道接口返回 503) ----
+    # 只允许通过 .env 或 Nacos 注入,严禁写入代码与仓库
+    smtp_host: str = ""
+    smtp_port: int = 465
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_ssl: bool = True
+
+    dingtalk_webhook_url: str = ""
+    dingtalk_secret: str = ""
+    wecom_webhook_url: str = ""
+    feishu_webhook_url: str = ""
+
+    jenkins_base_url: str = ""
+    jenkins_user: str = ""
+    jenkins_token: str = ""
+    gitlab_base_url: str = ""
+    gitlab_token: str = ""
+    github_token: str = ""
+
+    jira_base_url: str = ""
+    jira_user: str = ""
+    jira_token: str = ""
+    jira_project_key: str = ""
+    zentao_base_url: str = ""
+    zentao_account: str = ""
+    zentao_password: str = ""
+    zentao_product_id: str = ""
+
+    # 外部系统回调的共享密钥(X-Webhook-Token);为空则回调只接受平台登录令牌
+    webhook_secret: str = ""
+    # 本平台对外地址,用于通知里的跳转链接
+    platform_base_url: str = ""
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
     
     def __init__(self, **kwargs):
@@ -41,20 +76,15 @@ class Settings(BaseSettings):
             config_text = client.get_config(self.nacos_data_id, self.nacos_group)
             if config_text:
                 config = json.loads(config_text)
-                
-                # 覆盖本地配置
-                if "database_url" in config:
-                    self.database_url = config["database_url"]
-                if "secret_key" in config:
-                    self.secret_key = config["secret_key"]
-                if "algorithm" in config:
-                    self.algorithm = config["algorithm"]
-                if "access_token_expire_minutes" in config:
-                    self.access_token_expire_minutes = config["access_token_expire_minutes"]
-                if "cors_origins" in config:
-                    self.cors_origins = config["cors_origins"]
-                
-                print(f"[OK] 已从 Nacos 加载配置: {self.nacos_data_id}")
+
+                # 覆盖本地配置:凡是模型上声明过的字段都允许从 Nacos 下发
+                applied = 0
+                for key, value in config.items():
+                    if key in type(self).model_fields:
+                        setattr(self, key, value)
+                        applied += 1
+
+                print(f"[OK] 已从 Nacos 加载配置: {self.nacos_data_id}, 覆盖 {applied} 项")
             else:
                 print(f"[WARN] Nacos 中未找到配置: {self.nacos_data_id}，使用本地 .env 配置")
         except ImportError:

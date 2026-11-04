@@ -283,6 +283,7 @@ class TestRunOut(BaseModel):
     screenshot: str
     executed_by: int
     executed_at: datetime
+    duration_seconds: int | None = None
 
 
 # ---------- 操作日志 ----------

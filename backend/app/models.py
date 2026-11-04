@@ -109,6 +109,7 @@ class TestRun(Base):
     executed_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     executed_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     round_id: Mapped[int | None] = mapped_column(ForeignKey("test_rounds.id", ondelete="SET NULL"), nullable=True, index=True)  # 所属轮次
+    duration_seconds: Mapped[int | None] = mapped_column(nullable=True)  # 执行耗时(秒),自动化回传
 
 
 # ===================== 计划-用例 圈选范围(快照) =====================
@@ -394,3 +395,33 @@ class CustomFieldValue(Base):
     field_id: Mapped[int] = mapped_column(ForeignKey("custom_fields.id", ondelete="CASCADE"), index=True)
     testcase_id: Mapped[int] = mapped_column(ForeignKey("testcases.id", ondelete="CASCADE"), index=True)
     value: Mapped[str] = mapped_column(Text, default="")
+
+
+# ===================== 外部集成:回调事件与外部缺陷映射 =====================
+class WebhookEvent(Base):
+    """外部系统回调原始记录:先落库再处理,避免事件丢失"""
+    __tablename__ = "webhook_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source: Mapped[str] = mapped_column(String(32), index=True)  # jenkins/jira/zentao/gitlab/github
+    event_type: Mapped[str] = mapped_column(String(64), default="")
+    external_key: Mapped[str] = mapped_column(String(128), default="", index=True)  # 外部主键,便于幂等
+    payload: Mapped[str] = mapped_column(Text, default="")  # 原始 JSON
+    handle_result: Mapped[str] = mapped_column(String(32), default="已接收")  # 已建缺陷/已更新/未识别/已忽略
+    handle_note: Mapped[str] = mapped_column(Text, default="")
+    received_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    received_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), index=True)
+
+
+class DefectExternal(Base):
+    """本地缺陷与外部系统(Jira/禅道)工单的对应关系"""
+    __tablename__ = "defect_external_links"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    defect_id: Mapped[int] = mapped_column(ForeignKey("defects.id", ondelete="CASCADE"), index=True)
+    system: Mapped[str] = mapped_column(String(32), index=True)
+    external_id: Mapped[str] = mapped_column(String(128), index=True)
+    external_url: Mapped[str] = mapped_column(String(500), default="")
+    synced_status: Mapped[str] = mapped_column(String(32), default="")
+    synced_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
