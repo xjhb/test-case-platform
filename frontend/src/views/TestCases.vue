@@ -253,6 +253,8 @@ function resetForm() {
   form.steps = ''
   form.expected = ''
   form.priority = 'P1'
+  stepRows.value = []
+  stepsDirty.value = false
 }
 
 function openCreate() {
@@ -275,7 +277,66 @@ function openEdit(row) {
   form.steps = row.steps
   form.expected = row.expected
   form.priority = row.priority
+  stepRows.value = []
+  stepsDirty.value = false
   dialogVisible.value = true
+  loadSteps(row.id)
+}
+
+// ---- 结构化步骤 ----
+const stepRows = ref([])
+const stepsDirty = ref(false)
+const stepsLoading = ref(false)
+
+async function loadSteps(id) {
+  stepsLoading.value = true
+  try {
+    const res = await testcaseApi.steps(id)
+    stepRows.value = (res || []).map((s) => ({ step_no: s.step_no, action: s.action, expected: s.expected, data: s.data }))
+  } catch (e) {
+    stepRows.value = []
+  } finally {
+    stepsLoading.value = false
+  }
+}
+
+function addStepRow() {
+  stepRows.value.push({ step_no: stepRows.value.length + 1, action: '', expected: '', data: '' })
+  stepsDirty.value = true
+}
+
+function removeStepRow(i) {
+  stepRows.value.splice(i, 1)
+  stepRows.value.forEach((s, idx) => (s.step_no = idx + 1))
+  stepsDirty.value = true
+}
+
+async function submit() {
+  await formRef.value.validate()
+  const payload = {
+    project_id: form.project_id,
+    module: form.module,
+    title: form.title,
+    precondition: form.precondition,
+    steps: form.steps,
+    expected: form.expected,
+    priority: form.priority,
+  }
+  let caseId = form.id
+  if (isEdit.value) {
+    await testcaseApi.update(form.id, payload)
+  } else {
+    const created = await testcaseApi.create(payload)
+    caseId = created.id
+  }
+  const clean = stepRows.value.filter((s) => (s.action || '').trim() || (s.expected || '').trim())
+  if (stepsDirty.value) {
+    await testcaseApi.saveSteps(caseId, clean.map((s, i) => ({ ...s, step_no: i + 1 })))
+  }
+  ElMessage.success(isEdit.value ? '修改成功' : '创建成功')
+  dialogVisible.value = false
+  load()
+  loadStats()
 }
 
 function openVersions(row) {
@@ -320,29 +381,6 @@ async function submitReject() {
   ElMessage.success('已驳回')
   rejectVisible.value = false
   load()
-}
-
-async function submit() {
-  await formRef.value.validate()
-  const payload = {
-    project_id: form.project_id,
-    module: form.module,
-    title: form.title,
-    precondition: form.precondition,
-    steps: form.steps,
-    expected: form.expected,
-    priority: form.priority,
-  }
-  if (isEdit.value) {
-    await testcaseApi.update(form.id, payload)
-    ElMessage.success('修改成功')
-  } else {
-    await testcaseApi.create(payload)
-    ElMessage.success('创建成功')
-  }
-  dialogVisible.value = false
-  load()
-  loadStats()
 }
 
 async function remove(row) {
@@ -431,6 +469,7 @@ async function handleImportUpload(opt) {
 const execVisible = ref(false)
 const execFormRef = ref()
 const execForm = reactive({ testcase_id: null, status: '通过', remark: '', screenshot: '' })
+const execSteps = ref([])
 const execRules = {
   status: [{ required: true, message: '请选择执行结果', trigger: 'change' }],
 }
@@ -448,7 +487,30 @@ function openExec(row) {
   execForm.remark = ''
   execForm.screenshot = ''
   execFileList.value = []
+  execSteps.value = []
   execVisible.value = true
+  testcaseApi
+    .steps(row.id)
+    .then((res) => {
+      execSteps.value = (res || []).map((s) => ({ ...s, status: '未执行', actual: '', screenshot: '' }))
+    })
+    .catch(() => {
+      execSteps.value = []
+    })
+}
+
+// 步骤级执行:整体结果由步骤推导,与后端 _derive_status 同口径
+const execHasSteps = computed(() => execSteps.value.length > 0)
+const execDerived = computed(() => {
+  const list = execSteps.value.map((s) => s.status)
+  if (list.includes('失败')) return '失败'
+  if (list.includes('阻塞')) return '阻塞'
+  if (list.includes('通过')) return '通过'
+  return '未执行'
+})
+
+function stepStatusType(st) {
+  return { 通过: 'success', 失败: 'danger', 阻塞: 'warning', 未执行: 'info' }[st] || 'info'
 }
 
 function beforeUpload(file) {
@@ -475,20 +537,26 @@ function handleRemove() {
 
 async function submitExec() {
   await execFormRef.value.validate()
-  if (execForm.status === '通过' && !execForm.screenshot) {
+  const useSteps = execHasSteps.value && execDerived.value !== '未执行'
+  const finalStatus = useSteps ? execDerived.value : execForm.status
+  if (finalStatus === '通过' && !execForm.screenshot) {
     ElMessage.error('未上传图片,选择"通过"时必须上传成功截图')
     return
   }
-  await runApi.create({
+  const body = {
     plan_id: query.plan_id,
     testcase_id: execForm.testcase_id,
-    status: execForm.status,
+    status: finalStatus,
     remark: execForm.remark,
     screenshot: execForm.screenshot,
     // 显式指定执行阶段,不再由后端取计划当前阶段
     stage: activeStage.value,
-  })
-  ElMessage.success(`已记录执行结果(阶段:${stageLabel(activeStage.value)})`)
+  }
+  if (useSteps) {
+    body.step_results = execSteps.value.map((s) => ({ step_id: s.id, status: s.status, actual: s.actual }))
+  }
+  await runApi.create(body)
+  ElMessage.success(`已记录执行结果(阶段:${stageLabel(activeStage.value)},${useSteps ? `按步骤推导为「${finalStatus}」` : finalStatus})`)
   execVisible.value = false
   load()
   loadStats()
@@ -499,6 +567,7 @@ const historyVisible = ref(false)
 const historyList = ref([])
 const historyLoading = ref(false)
 const historyTitle = ref('')
+const stepCache = ref({})
 
 async function openHistory(row) {
   if (!query.plan_id) {
@@ -508,11 +577,17 @@ async function openHistory(row) {
   historyTitle.value = `执行历史 - ${row.title}`
   historyVisible.value = true
   historyLoading.value = true
+  stepCache.value = {}
   try {
     historyList.value = await runApi.list(row.id, query.plan_id)
   } finally {
     historyLoading.value = false
   }
+}
+
+async function onHistoryExpand(row) {
+  if (stepCache.value[row.id]) return
+  stepCache.value[row.id] = await runApi.stepResults(row.id).catch(() => [])
 }
 
 const stageTagType = (s) => ({ SIT: 'primary', UAT: 'warning', PRE: 'danger' }[s] || 'info')
@@ -1080,6 +1155,31 @@ onBeforeUnmount(() => {
         <el-form-item label="测试步骤">
           <el-input v-model="form.steps" type="textarea" :rows="4" placeholder="1. ...&#10;2. ...&#10;3. ..." />
         </el-form-item>
+        <el-form-item label="结构化步骤">
+          <div style="width: 100%">
+            <el-table v-loading="stepsLoading" :data="stepRows" border size="small" empty-text="未使用结构化步骤(执行时按整条用例记录结果)">
+              <el-table-column prop="step_no" label="#" width="46" />
+              <el-table-column label="操作步骤" min-width="150">
+                <template #default="{ row }"><el-input v-model="row.action" size="small" @input="stepsDirty = true" /></template>
+              </el-table-column>
+              <el-table-column label="预期结果" min-width="150">
+                <template #default="{ row }"><el-input v-model="row.expected" size="small" @input="stepsDirty = true" /></template>
+              </el-table-column>
+              <el-table-column label="测试数据" width="120">
+                <template #default="{ row }"><el-input v-model="row.data" size="small" @input="stepsDirty = true" /></template>
+              </el-table-column>
+              <el-table-column label="" width="60">
+                <template #default="{ $index }">
+                  <el-button link type="danger" size="small" @click="removeStepRow($index)">删除</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+            <el-button size="small" style="margin-top: 8px" @click="addStepRow">
+              <el-icon><Plus /></el-icon>添加步骤
+            </el-button>
+            <span style="margin-left: 8px; color: #909399; font-size: 12px">有结构化步骤时,执行页可逐步填写结果并自动推导整体状态</span>
+          </div>
+        </el-form-item>
         <el-form-item label="预期结果">
           <el-input v-model="form.expected" type="textarea" :rows="3" placeholder="期望发生的现象" />
         </el-form-item>
@@ -1105,14 +1205,46 @@ onBeforeUnmount(() => {
             <el-option v-for="s in STAGE_OPTIONS" :key="s.value" :label="s.label" :value="s.value" />
           </el-select>
         </el-form-item>
-        <el-form-item label="执行结果" prop="status">
+        <el-form-item v-if="execHasSteps" label="步骤结果">
+          <div style="width: 100%">
+            <el-table :data="execSteps" border size="small" max-height="260">
+              <el-table-column prop="step_no" label="#" width="42" />
+              <el-table-column label="操作/预期" min-width="180">
+                <template #default="{ row }">
+                  <div>{{ row.action || '-' }}</div>
+                  <div v-if="row.expected" style="color: #909399; font-size: 12px">预期: {{ row.expected }}</div>
+                </template>
+              </el-table-column>
+              <el-table-column label="结果" width="150">
+                <template #default="{ row }">
+                  <el-radio-group v-model="row.status" size="small">
+                    <el-radio-button value="通过">通过</el-radio-button>
+                    <el-radio-button value="失败">失败</el-radio-button>
+                    <el-radio-button value="阻塞">阻塞</el-radio-button>
+                  </el-radio-group>
+                </template>
+              </el-table-column>
+              <el-table-column label="实际结果" min-width="160">
+                <template #default="{ row }">
+                  <el-input v-model="row.actual" size="small" :disabled="row.status === '未执行'" placeholder="实际发生的情况" />
+                </template>
+              </el-table-column>
+            </el-table>
+            <div style="margin-top: 8px; font-size: 13px">
+              整体结果由步骤推导:
+              <el-tag :type="stepStatusType(execDerived)" size="small">{{ execDerived }}</el-tag>
+              <span style="margin-left: 8px; color: #909399">任一失败=失败,否则有阻塞=阻塞</span>
+            </div>
+          </div>
+        </el-form-item>
+        <el-form-item v-if="!execHasSteps" label="执行结果" prop="status">
           <el-radio-group v-model="execForm.status">
             <el-radio value="通过">通过</el-radio>
             <el-radio value="失败">失败</el-radio>
             <el-radio value="阻塞">阻塞</el-radio>
           </el-radio-group>
         </el-form-item>
-        <el-form-item v-if="execForm.status === '通过'" label="成功截图" required>
+        <el-form-item v-if="(execHasSteps ? execDerived === '通过' : execForm.status === '通过')" label="成功截图" required>
           <el-upload
             :action="uploadImageUrl"
             :headers="uploadHeaders"
@@ -1144,7 +1276,38 @@ onBeforeUnmount(() => {
 
     <!-- 执行历史 -->
     <el-dialog v-model="historyVisible" :title="historyTitle" width="720px">
-      <el-table v-loading="historyLoading" :data="historyList" border size="small">
+      <el-table
+        v-loading="historyLoading"
+        :data="historyList"
+        border
+        size="small"
+        @expand-change="onHistoryExpand"
+      >
+        <el-table-column type="expand">
+          <template #default="{ row }">
+            <div style="padding: 8px 16px">
+              <el-table
+                v-if="(stepCache[row.id] || []).length"
+                :data="stepCache[row.id]"
+                border
+                size="small"
+              >
+                <el-table-column prop="step_no" label="#" width="46" />
+                <el-table-column prop="action" label="操作步骤" min-width="160" show-overflow-tooltip />
+                <el-table-column prop="expected" label="预期结果" min-width="140" show-overflow-tooltip />
+                <el-table-column label="结果" width="80">
+                  <template #default="s">
+                    <el-tag :type="stepStatusType(s.row.status)" size="small">{{ s.row.status }}</el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="actual" label="实际结果" min-width="140" show-overflow-tooltip />
+              </el-table>
+              <span v-else style="color: #909399; font-size: 12px">
+                {{ stepCache[row.id] ? '该次执行未填写步骤结果' : '加载中...' }}
+              </span>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column prop="id" label="ID" width="70" />
         <el-table-column label="阶段" width="90">
           <template #default="{ row }">

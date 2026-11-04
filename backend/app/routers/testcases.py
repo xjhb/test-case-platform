@@ -12,8 +12,8 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..deps import accessible_project_ids, get_current_user, require_project_access
 from ..logger import log_op
-from ..models import Defect, TestCase, TestCaseVersion, TestPlan, TestRun, User
-from ..schemas import TestCaseCreate, TestCaseOut, TestCaseUpdate
+from ..models import Defect, TestCase, TestCaseStep, TestCaseVersion, TestPlan, TestRun, User
+from ..schemas import TestCaseCreate, TestCaseOut, TestCaseStepIn, TestCaseStepOut, TestCaseUpdate
 
 router = APIRouter(prefix="/api/testcases", tags=["测试用例"], dependencies=[Depends(get_current_user)])
 
@@ -348,6 +348,54 @@ def delete_testcase(tcid: int, db: Session = Depends(get_db), current: User = De
     db.commit()
     log_op(db, current, "删除", target=f"用例#{tcid} {title}")
     return {"ok": True}
+
+
+# ===================== 结构化步骤 =====================
+def _steps_of(db: Session, tcid: int) -> list[TestCaseStep]:
+    return list(
+        db.execute(
+            select(TestCaseStep).where(TestCaseStep.testcase_id == tcid).order_by(TestCaseStep.step_no.asc(), TestCaseStep.id.asc())
+        ).scalars()
+    )
+
+
+@router.get("/{tcid}/steps", response_model=list[TestCaseStepOut])
+def get_steps(tcid: int, db: Session = Depends(get_db), current: User = Depends(get_current_user)):
+    tc = db.get(TestCase, tcid)
+    if not tc:
+        raise HTTPException(status_code=404, detail="用例不存在")
+    require_project_access(tc.project_id, db, current)
+    return _steps_of(db, tcid)
+
+
+@router.put("/{tcid}/steps", response_model=list[TestCaseStepOut])
+def save_steps(
+    tcid: int,
+    payload: list[TestCaseStepIn] = Body(...),
+    db: Session = Depends(get_db),
+    current: User = Depends(get_current_user),
+):
+    """整体覆盖用例步骤列表;steps 自由文本保留不动,前端有结构化步骤时优先展示步骤"""
+    tc = db.get(TestCase, tcid)
+    if not tc:
+        raise HTTPException(status_code=404, detail="用例不存在")
+    require_project_access(tc.project_id, db, current)
+
+    db.execute(TestCaseStep.__table__.delete().where(TestCaseStep.testcase_id == tcid))
+    rows = []
+    for i, s in enumerate(payload, start=1):
+        row = TestCaseStep(
+            testcase_id=tcid,
+            step_no=s.step_no or i,
+            action=s.action or "",
+            expected=s.expected or "",
+            data=s.data or "",
+        )
+        db.add(row)
+        rows.append(row)
+    db.commit()
+    log_op(db, current, "编辑", target=f"用例#{tcid} {tc.title}", detail=f"步骤{len(rows)}条")
+    return _steps_of(db, tcid)
 
 
 # ---------- 评审流程 ----------
