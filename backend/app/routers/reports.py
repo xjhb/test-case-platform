@@ -3,17 +3,18 @@ import json
 from datetime import datetime
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..deps import accessible_project_ids, get_current_user, require_project_access
 from ..logger import log_op
 from ..models import Defect, Project, TestCase, TestPlan, TestReport, TestRun, User
+from ..pdf import build_report_pdf
 from ..scope import plan_cases
 from ..schemas import TestReportOut
 
@@ -46,6 +47,122 @@ def _user_name(db: Session, uid: int | None) -> str:
         return ""
     u = db.get(User, uid)
     return u.display_name or u.username if u else ""
+
+
+def _fmt_dt(start: datetime | None, end: datetime | None) -> str:
+    if start and end:
+        return f"{start.strftime('%Y-%m-%d')} ~ {end.strftime('%Y-%m-%d')}"
+    only = start or end
+    return only.strftime("%Y-%m-%d") if only else "未安排"
+
+
+def _pdf_response(data: bytes, fname: str):
+    # 文件名可能含中文, 需要 RFC 5987 编码, 否则浏览器下载到的文件名会乱码
+    ascii_name = fname.encode("ascii", "ignore").decode() or "report.pdf"
+    return Response(
+        content=data,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(fname)}"},
+    )
+
+
+@router.get("/plan/{plan_id}/export-pdf")
+def export_plan_report_pdf(plan_id: int, db: Session = Depends(get_db), current: User = Depends(get_current_user)):
+    """计划维度 PDF 测试报告:阶段统计 + 用例明细 + 失败阻塞 + 关联缺陷 + 结论"""
+    plan = db.get(TestPlan, plan_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="计划不存在")
+    require_project_access(plan.project_id, db, current)
+    project = db.get(Project, plan.project_id)
+    cases = plan_cases(db, plan)
+    stage_maps = {st: _latest_run_map(db, plan_id, st) for st in STAGE_ORDER}
+
+    total = len(cases)
+    stage_rows = []
+    for st in STAGE_ORDER:
+        m = stage_maps[st]
+        passed = failed = blocked = 0
+        for c in cases:
+            s = m[c.id].status if c.id in m else "未执行"
+            if s == "通过":
+                passed += 1
+            elif s == "失败":
+                failed += 1
+            elif s == "阻塞":
+                blocked += 1
+        pending = total - passed - failed - blocked
+        rate = f"{passed / total * 100:.1f}%" if total else "0%"
+        stage_rows.append([st, total, passed, failed, blocked, pending, rate])
+
+    case_rows = []
+    problem_rows = []
+    exec_cache: dict[int, str] = {}
+    for tc in cases:
+        marks = []
+        for st in STAGE_ORDER:
+            run = stage_maps[st].get(tc.id)
+            s = run.status if run else "未执行"
+            marks.append(s)
+            if run and run.status in ("失败", "阻塞"):
+                who = exec_cache.get(run.executed_by) or _user_name(db, run.executed_by)
+                exec_cache[run.executed_by] = who
+                problem_rows.append([st, tc.id, tc.module, tc.title, s, who,
+                                     run.executed_at.strftime("%Y-%m-%d %H:%M") if run.executed_at else "",
+                                     run.remark])
+        case_rows.append([tc.id, tc.module, tc.title, tc.priority, *marks,
+                          marks[STAGE_ORDER.index(plan.current_stage)]])
+
+    case_ids = {c.id for c in cases}
+    title_by_id = {c.id: c.title for c in cases}
+    defects = list(db.execute(
+        select(Defect).where(or_(Defect.plan_id == plan_id, Defect.testcase_id.in_(case_ids or {0})))
+    ).scalars())
+    defect_rows = [
+        [d.id, d.title, d.severity, d.priority, d.status, _user_name(db, d.assignee_id),
+         title_by_id.get(d.testcase_id, "-")]
+        for d in defects
+    ]
+    cur = stage_rows[STAGE_ORDER.index(plan.current_stage)]
+    open_critical = sum(1 for d in defects if d.severity in ("致命", "严重") and d.status != "关闭")
+    conclusion = (
+        f"共 {total} 条用例,{plan.current_stage} 阶段通过 {cur[2]} 条,通过率 {cur[6]},未执行 {cur[5]} 条。"
+        f"关联缺陷 {len(defects)} 个,其中未关闭的致命/严重缺陷 {open_critical} 个。"
+    )
+    if open_critical:
+        conclusion += "\n存在致命或严重缺陷未关闭,建议完成修复与回归验证后再申请准出。"
+    elif cur[5]:
+        conclusion += "\n尚有未执行用例,建议补齐执行后再出具验收结论。"
+    else:
+        conclusion += "\n纳入范围的用例已全部执行,无遗留致命/严重缺陷。"
+
+    info_rows = [
+        ["项目名称", project.name if project else "", "计划版本", plan.version],
+        ["当前阶段", plan.current_stage, "计划状态", plan.status],
+        ["用例总数", str(total), "报告生成", f"{current.display_name} {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"],
+        ["SIT 时间", _fmt_dt(plan.sit_start, plan.sit_end), "UAT 时间", _fmt_dt(plan.uat_start, plan.uat_end)],
+        ["PRE 时间", _fmt_dt(plan.pre_start, plan.pre_end), "缺陷总数", str(len(defects))],
+    ]
+    data = build_report_pdf(
+        title="测 试 报 告",
+        subtitle=f"{project.name if project else ''} / {plan.version}",
+        info_rows=info_rows,
+        sections=[
+            {"name": "一、阶段执行统计", "columns": ["阶段", "用例总数", "通过", "失败", "阻塞", "未执行", "通过率"],
+             "rows": stage_rows, "widths": [12, 16, 12, 12, 12, 14, 14]},
+            {"name": "二、用例执行明细", "columns": ["ID", "模块", "用例标题", "优先级", "SIT", "UAT", "PRE", "当前"],
+             "rows": case_rows, "widths": [6, 14, 34, 8, 8, 8, 8, 8]},
+            {"name": "三、失败与阻塞用例", "columns": ["阶段", "ID", "模块", "用例标题", "结果", "执行人", "执行时间", "备注"],
+             "rows": problem_rows or [["-", "-", "-", "无失败/阻塞记录", "-", "-", "-", "-"]],
+             "widths": [8, 6, 12, 22, 8, 10, 14, 20]},
+            {"name": "四、关联缺陷", "columns": ["ID", "标题", "严重级", "优先级", "状态", "指派人", "关联用例"],
+             "rows": defect_rows or [["-", "无关联缺陷", "-", "-", "-", "-", "-"]],
+             "widths": [6, 30, 10, 10, 10, 12, 22]},
+        ],
+        conclusion=conclusion,
+        footer="测管平台自动生成 · 数据以平台在线记录为准",
+    )
+    log_op(db, current, "导出", target=f"测试报告PDF 计划#{plan.id} {plan.version}")
+    return _pdf_response(data, f"test_report_{plan.version}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf")
 
 
 @router.get("/plan/{plan_id}/export")
@@ -413,6 +530,81 @@ def get_report(
         generated_by_name=generator.display_name if generator else "",
         generated_at=r.generated_at, summary=r.summary,
     )
+
+
+@router.get("/{report_id}/export-pdf")
+def export_generated_report_pdf(
+    report_id: int,
+    db: Session = Depends(get_db),
+    current: User = Depends(get_current_user),
+):
+    """已生成报告快照的 PDF 版:概要 + 执行明细 + 缺陷列表"""
+    r = db.get(TestReport, report_id)
+    if not r:
+        raise HTTPException(404, "报告不存在")
+    plan = db.get(TestPlan, r.plan_id)
+    if plan:
+        require_project_access(plan.project_id, db, current)
+    project = db.get(Project, plan.project_id) if plan else None
+    generator = db.get(User, r.generated_by) if r.generated_by else None
+    data = json.loads(r.summary) if r.summary else {}
+
+    runs = data.get("runs", [])
+    run_rows = [
+        [x.get("testcase_id", ""), x.get("testcase_title", ""), x.get("status", ""),
+         x.get("executed_by_name") or _user_name(db, x.get("executed_by")),
+         (x.get("executed_at") or "")[:16].replace("T", " "), x.get("remark", "")]
+        for x in runs
+    ]
+    defects = data.get("defects", [])
+    defect_rows = [
+        [d.get("id", ""), d.get("title", ""), d.get("severity", ""), d.get("priority", ""),
+         d.get("status", ""), _user_name(db, d.get("assignee_id"))]
+        for d in defects
+    ]
+    info_rows = [
+        ["报告标题", r.title, "测试阶段", r.stage],
+        ["项目名称", project.name if project else "-", "计划版本", plan.version if plan else "-"],
+        ["生成人", generator.display_name if generator else "-", "生成时间",
+         r.generated_at.strftime("%Y-%m-%d %H:%M:%S") if r.generated_at else "-"],
+    ]
+    summary_rows = [
+        ["用例总数", r.total_cases, "通过", r.passed_cases],
+        ["失败", r.failed_cases, "阻塞", r.blocked_cases],
+        ["未执行", r.unexecuted_cases, "通过率", f"{r.pass_rate}%"],
+        ["缺陷总数", r.defect_count, "致命/严重", r.critical_defects],
+    ]
+    conclusion = (
+        f"本阶段共 {r.total_cases} 条用例,通过 {r.passed_cases} 条,失败 {r.failed_cases} 条,"
+        f"阻塞 {r.blocked_cases} 条,未执行 {r.unexecuted_cases} 条,通过率 {r.pass_rate}%。"
+        f"未关闭缺陷 {r.defect_count} 个,其中致命/严重 {r.critical_defects} 个。"
+    )
+    if r.critical_defects:
+        conclusion += "\n存在致命或严重缺陷,建议修复并回归验证后再准出。"
+    elif r.unexecuted_cases or r.failed_cases:
+        conclusion += "\n仍有失败或未执行用例,请确认剩余风险后再准出。"
+    else:
+        conclusion += "\n本阶段用例全部通过,无遗留缺陷。"
+
+    pdf = build_report_pdf(
+        title="阶段测试报告",
+        subtitle=r.title,
+        info_rows=info_rows,
+        sections=[
+            {"name": "一、结果概要", "columns": ["指标", "数值", "指标", "数值"], "rows": summary_rows,
+             "widths": [22, 28, 22, 28]},
+            {"name": "二、执行明细", "columns": ["用例ID", "用例标题", "结果", "执行人", "执行时间", "备注"],
+             "rows": run_rows or [["-", "无执行记录", "-", "-", "-", "-"]],
+             "widths": [8, 32, 10, 12, 16, 22]},
+            {"name": "三、缺陷列表", "columns": ["ID", "标题", "严重级", "优先级", "状态", "指派人"],
+             "rows": defect_rows or [["-", "无关联缺陷", "-", "-", "-", "-"]],
+             "widths": [8, 40, 12, 12, 12, 14]},
+        ],
+        conclusion=conclusion,
+        footer="测管平台自动生成 · 数据以生成时刻的平台记录为准",
+    )
+    log_op(db, current, "导出", target=f"测试报告PDF 报告#{r.id} {r.title}")
+    return _pdf_response(pdf, f"report_{r.id}_{r.stage}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf")
 
 
 @router.get("/{report_id}/export")

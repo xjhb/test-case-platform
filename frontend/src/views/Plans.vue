@@ -115,9 +115,10 @@ async function remove(row) {
   load()
 }
 
-async function exportReport(row) {
+async function exportReport(row, fmt = 'xlsx') {
   const token = localStorage.getItem('token') || ''
-  const resp = await fetch(reportApi.exportPlan(row.id), {
+  const url = fmt === 'pdf' ? reportApi.exportPlanPdf(row.id) : reportApi.exportPlan(row.id)
+  const resp = await fetch(url, {
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!resp.ok) {
@@ -126,13 +127,22 @@ async function exportReport(row) {
     return
   }
   const blob = await resp.blob()
-  const url = URL.createObjectURL(blob)
+  const objUrl = URL.createObjectURL(blob)
   const a = document.createElement('a')
-  a.href = url
-  a.download = `测试报告_${row.version}.xlsx`
+  a.href = objUrl
+  a.download = serverFilename(resp.headers.get('Content-Disposition')) || `测试报告_${row.version}.${fmt}`
   a.click()
-  URL.revokeObjectURL(url)
+  URL.revokeObjectURL(objUrl)
   ElMessage.success('报告已导出')
+}
+
+// 后端用 RFC 5987 的 filename* 传中文名,直接取会带 UTF-8'' 前缀
+function serverFilename(header) {
+  if (!header) return ''
+  const star = header.match(/filename\*=UTF-8''([^;]+)/i)
+  if (star) return decodeURIComponent(star[1])
+  const plain = header.match(/filename="([^"]+)"/i)
+  return plain ? plain[1] : ''
 }
 
 function projName(pid) {
@@ -472,7 +482,15 @@ async function clearScope() {
           <el-button link type="primary" @click="openAdvance(row)" :disabled="row.status === '已完成'">阶段推进</el-button>
           <el-button link type="primary" @click="openStageTimes(row)">阶段时间</el-button>
           <el-button link type="primary" @click="openScope(row)">用例范围</el-button>
-          <el-button link type="success" @click="exportReport(row)">导出报告</el-button>
+          <el-dropdown @command="(fmt) => exportReport(row, fmt)">
+            <el-button link type="success">导出报告</el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="pdf">PDF 报告</el-dropdown-item>
+                <el-dropdown-item command="xlsx">Excel 明细</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
           <el-button link type="danger" @click="remove(row)">删除</el-button>
         </template>
       </el-table-column>

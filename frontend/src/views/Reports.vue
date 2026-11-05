@@ -40,10 +40,11 @@
       <el-table-column prop="generated_at" label="生成时间" width="160">
         <template #default="{ row }">{{ formatDate(row.generated_at) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="200" fixed="right">
+      <el-table-column label="操作" width="260" fixed="right">
         <template #default="{ row }">
           <el-button size="small" @click="viewReport(row)">查看</el-button>
-          <el-button size="small" type="success" @click="exportReport(row)">导出</el-button>
+          <el-button size="small" type="success" @click="exportReport(row)">Excel</el-button>
+          <el-button size="small" type="warning" @click="exportReport(row, 'pdf')">PDF</el-button>
           <el-button size="small" type="danger" @click="handleDelete(row)" v-if="role === 'admin'">删除</el-button>
         </template>
       </el-table-column>
@@ -122,7 +123,8 @@
       </div>
       <template #footer>
         <el-button @click="viewDialogVisible = false">关闭</el-button>
-        <el-button type="primary" @click="exportReport(currentReport)" v-if="currentReport">导出Excel</el-button>
+        <el-button type="success" @click="exportReport(currentReport)" v-if="currentReport">导出Excel</el-button>
+        <el-button type="warning" @click="exportReport(currentReport, 'pdf')" v-if="currentReport">导出PDF</el-button>
       </template>
     </el-dialog>
   </div>
@@ -211,10 +213,10 @@ const viewReport = async (row) => {
   viewDialogVisible.value = true
 }
 
-const exportReport = async (row) => {
+const exportReport = async (row, fmt = 'xlsx') => {
   const token = localStorage.getItem('token')
   try {
-    const response = await fetch(`/api/reports/${row.id}/export`, {
+    const response = await fetch(`/api/reports/${row.id}/export${fmt === 'pdf' ? '-pdf' : ''}`, {
       headers: {
         'Authorization': `Bearer ${token}`,
       },
@@ -224,7 +226,6 @@ const exportReport = async (row) => {
       throw new Error(`导出失败: ${response.status} - ${errorText}`)
     }
     const blob = await response.blob()
-    console.log('Blob size:', blob.size, 'type:', blob.type)
     if (blob.size === 0) {
       ElMessage.error('导出的文件为空，请检查报告数据')
       return
@@ -232,7 +233,7 @@ const exportReport = async (row) => {
     const url = window.URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `report_${row.id}.xlsx`
+    a.download = filenameFromDisposition(response.headers.get('Content-Disposition')) || `report_${row.id}.${fmt}`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
@@ -242,6 +243,15 @@ const exportReport = async (row) => {
     console.error(e)
     ElMessage.error(e.message || '导出失败')
   }
+}
+
+// 后端用 RFC 5987 的 filename* 传中文名,直接取会带 UTF-8'' 前缀
+const filenameFromDisposition = (header) => {
+  if (!header) return ''
+  const star = header.match(/filename\*=UTF-8''([^;]+)/i)
+  if (star) return decodeURIComponent(star[1])
+  const plain = header.match(/filename="([^"]+)"/i)
+  return plain ? plain[1] : ''
 }
 
 const handleDelete = async (row) => {

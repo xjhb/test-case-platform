@@ -130,6 +130,7 @@ export const userApi = {
 // ---- 测试报告 ----
 export const reportApi = {
   exportPlan: (planId) => `/api/reports/plan/${planId}/export`,
+  exportPlanPdf: (planId) => `/api/reports/plan/${planId}/export-pdf`,
   generate: (planId, stage) => request.post('/reports/generate', null, { params: { plan_id: planId, stage } }),
   list: (params) => request.get('/reports/list', { params }),
   get: (id) => request.get(`/reports/${id}`),

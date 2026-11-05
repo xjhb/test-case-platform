@@ -275,12 +275,18 @@
 
 | 方法 | 路径 | 说明 | 权限 |
 |------|------|------|------|
-| GET | `/list` | 报告列表 | 已登录 |
+| GET | `/list` | 报告列表(`project_id`/`plan_id` 筛选) | 已登录 |
 | POST | `/generate` | 生成报告 | 项目成员 |
 | GET | `/plan/{plan_id}/export` | 导出计划报告 Excel | 项目成员 |
+| GET | `/plan/{plan_id}/export-pdf` | 导出计划报告 PDF | 项目成员 |
 | GET | `/{id}` | 报告详情 | 项目成员 |
 | GET | `/{id}/export` | 导出报告 Excel | 项目成员 |
+| GET | `/{id}/export-pdf` | 导出报告 PDF | 项目成员 |
 | DELETE | `/{id}` | 删除报告 | Admin |
+
+> PDF 由后端 `reportlab` 直接生成(不依赖浏览器或 Office),中文字体内嵌,
+> 收件方无需安装字体。版式与字体回退规则见 [导出格式说明](导出格式说明.md)。
+> 两个导出接口都会写操作日志(`导出`),文件名按 RFC 5987 编码以支持中文版本名。
 
 ---
 
