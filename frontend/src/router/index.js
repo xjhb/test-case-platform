@@ -34,6 +34,12 @@ const routes = [
         meta: { title: '项目批次' },
       },
       {
+        path: 'gates',
+        name: 'gates',
+        component: () => import('../views/GateSettings.vue'),
+        meta: { title: '阶段门禁' },
+      },
+      {
         path: 'calendar',
         name: 'calendar',
         component: () => import('../views/Calendar.vue'),

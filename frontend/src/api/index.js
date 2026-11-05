@@ -77,7 +77,15 @@ export const planApi = {
   list: (params) => request.get('/plans', { params }),
   create: (data) => request.post('/plans', data),
   progress: (id) => request.get(`/plans/${id}/progress`),
-  advance: (id, targetStage) => request.post(`/plans/${id}/advance`, targetStage ? { target_stage: targetStage } : {}),
+  advance: (id, targetStage, opts = {}) =>
+    request.post(`/plans/${id}/advance`, {
+      target_stage: targetStage || null,
+      force: !!opts.force,
+      reason: opts.reason || '',
+    }),
+  complete: (id, opts = {}) =>
+    request.post(`/plans/${id}/complete`, { force: !!opts.force, reason: opts.reason || '' }),
+  reopen: (id) => request.post(`/plans/${id}/reopen`),
   remove: (id) => request.delete(`/plans/${id}`),
   updateStageTimes: (id, data) => request.put(`/plans/${id}/stage-times`, data),
   countdown: (id, stage) => request.get(`/plans/${id}/countdown`, { params: stage ? { stage } : {} }),
@@ -136,6 +144,16 @@ export const reportApi = {
   get: (id) => request.get(`/reports/${id}`),
   exportGenerated: (id) => `/api/reports/${id}/export`,
   remove: (id) => request.delete(`/reports/${id}`),
+}
+
+// ---- 阶段门禁 ----
+export const gateApi = {
+  rules: () => request.get('/gates/rules'),
+  list: (params) => request.get('/gates', { params }),
+  create: (data) => request.post('/gates', data),
+  update: (id, data) => request.put(`/gates/${id}`, data),
+  remove: (id) => request.delete(`/gates/${id}`),
+  check: (planId, stage, kind) => request.get('/gates/check', { params: { plan_id: planId, stage, kind } }),
 }
 
 // ---- 缺陷管理 ----

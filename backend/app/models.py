@@ -123,6 +123,22 @@ class PlanTestCase(Base):
     added_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
+# ===================== 阶段准入/准出门禁 =====================
+class StageGate(Base):
+    """按项目+阶段配置的门禁规则,阶段推进与计划完成时强制校验。"""
+    __tablename__ = "stage_gates"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    stage: Mapped[str] = mapped_column(String(8))  # SIT/UAT/PRE
+    kind: Mapped[str] = mapped_column(String(8))  # 准入/准出
+    rule: Mapped[str] = mapped_column(String(32))  # 规则键,见 app/gates.py
+    threshold: Mapped[int] = mapped_column(default=0)  # 阈值(百分比或条数)
+    enabled: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
 # ===================== 结构化用例步骤 =====================
 class TestCaseStep(Base):
     """用例步骤(逐步给出操作与预期结果)"""

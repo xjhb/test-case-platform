@@ -1,11 +1,14 @@
 <script setup>
-import { ref, reactive, onMounted, computed } from 'vue'
+import { ref, reactive, onMounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { planApi, projectApi, reportApi, p2Api, testcaseApi } from '../api'
+import { planApi, projectApi, reportApi, p2Api, testcaseApi, gateApi } from '../api'
+import { useAuthStore } from '../stores/auth'
 
 const route = useRoute()
 const router = useRouter()
+const auth = useAuthStore()
+const isAdmin = computed(() => auth.role === 'admin')
 
 const STAGES = ['SIT', 'UAT', 'PRE']
 const stageTagType = (s) => ({ SIT: 'primary', UAT: 'warning', PRE: 'danger' }[s] || 'info')
@@ -28,6 +31,11 @@ const advanceLoading = ref(false)
 const advancePlan = ref(null)
 const advanceProgress = ref(null)
 const targetStage = ref('')
+const gateLoading = ref(false)
+const gateOut = ref(null)   // 当前阶段准出
+const gateIn = ref(null)    // 目标阶段准入
+const forceOn = ref(false)
+const forceReason = ref('')
 
 const query = reactive({ project_id: '' })
 
@@ -76,28 +84,117 @@ async function openAdvance(row) {
   advanceVisible.value = true
   advanceLoading.value = true
   targetStage.value = ''
+  gateOut.value = null
+  gateIn.value = null
+  forceOn.value = false
+  forceReason.value = ''
   try {
     advanceProgress.value = await planApi.progress(row.id)
   } finally {
     advanceLoading.value = false
   }
+  loadGates()
 }
+
+const currentStageOf = computed(() => advanceProgress.value?.current_stage || '')
+const effectiveTarget = computed(() => targetStage.value || getNextStage(currentStageOf.value))
+const gatePassed = computed(() => (!gateOut.value || gateOut.value.passed) && (!gateIn.value || gateIn.value.passed))
+const gateConfigured = computed(() => !!(gateOut.value?.configured || gateIn.value?.configured))
+
+async function loadGates() {
+  const p = advanceProgress.value
+  if (!p || advancePlan.value?.status === '已完成') return
+  gateLoading.value = true
+  try {
+    const id = advancePlan.value.id
+    const reqs = [gateApi.check(id, p.current_stage, '准出')]
+    const target = effectiveTarget.value
+    if (target && target !== p.current_stage) reqs.push(gateApi.check(id, target, '准入'))
+    const res = await Promise.all(reqs)
+    gateOut.value = res[0].results[0]
+    gateIn.value = res[1] ? res[1].results[0] : null
+    if (gatePassed.value) forceOn.value = false
+  } catch {
+    gateOut.value = null
+    gateIn.value = null
+  } finally {
+    gateLoading.value = false
+  }
+}
+
+watch(targetStage, loadGates)
 
 async function doAdvance() {
   const p = advanceProgress.value
-  const nextStage = targetStage.value || getNextStage(p.current_stage)
+  const nextStage = effectiveTarget.value
   if (!nextStage) {
     ElMessage.error('没有可推进的下一阶段')
     return
   }
+  if (!gatePassed.value && !(await confirmForce('推进'))) return
   await ElMessageBox.confirm(
     `确认将计划「${advancePlan.value.version}」从 ${stageLabel(p.current_stage)} 推进到 ${stageLabel(nextStage)}?`,
     '阶段推进',
     { type: 'warning' }
   )
-  await planApi.advance(advancePlan.value.id, nextStage)
-  ElMessage.success(`已推进到${stageLabel(nextStage)}阶段`)
-  advanceVisible.value = false
+  try {
+    const res = await planApi.advance(advancePlan.value.id, nextStage, {
+      force: !gatePassed.value && forceOn.value,
+      reason: forceReason.value.trim(),
+    })
+    ElMessage.success(res.forced ? `已强制推进到${stageLabel(nextStage)}阶段` : `已推进到${stageLabel(nextStage)}阶段`)
+    advanceVisible.value = false
+    load()
+  } catch {
+    loadGates()
+  }
+}
+
+async function doComplete() {
+  if (!gatePassed.value && !(await confirmForce('完成'))) return
+  await ElMessageBox.confirm(
+    `确认将计划「${advancePlan.value.version}」标记为已完成?当前阶段为 ${stageLabel(currentStageOf.value)}。`,
+    '完成计划',
+    { type: 'warning' }
+  )
+  try {
+    const res = await planApi.complete(advancePlan.value.id, {
+      force: !gatePassed.value && forceOn.value,
+      reason: forceReason.value.trim(),
+    })
+    ElMessage.success(res.forced ? '门禁未达标,已由管理员强制完成' : '计划已完成')
+    advanceVisible.value = false
+    load()
+  } catch {
+    loadGates()
+  }
+}
+
+// 门禁未达标时的前端预检:仅管理员可强制,且必须填写理由
+async function confirmForce(action) {
+  if (!isAdmin.value) {
+    ElMessage.error(`门禁未达标,非管理员不能强制${action}`)
+    return false
+  }
+  if (!forceOn.value) {
+    ElMessage.warning(`门禁未达标,请勾选"强制${action}"并填写理由`)
+    return false
+  }
+  if (!forceReason.value.trim()) {
+    const r = await ElMessageBox.prompt('请填写强制' + action + '理由(将写入操作日志)', '强制' + action, {
+      inputPlaceholder: '例如:业务方同意带风险进入 UAT',
+      inputValidator: (v) => (v && v.trim() ? true : '理由不能为空'),
+    }).catch(() => null)
+    if (!r) return false
+    forceReason.value = r.value
+  }
+  return true
+}
+
+async function reopen(row) {
+  await ElMessageBox.confirm(`确定重新打开计划「${row.version}」?状态将回到进行中。`, '提示', { type: 'warning' })
+  await planApi.reopen(row.id)
+  ElMessage.success('已重新打开')
   load()
 }
 
@@ -479,7 +576,8 @@ async function clearScope() {
           <el-button link type="success" @click="openRounds(row)">打开轮次</el-button>
           <el-button link type="primary" @click="openRoundsDialog(row)">轮次管理</el-button>
           <el-button link type="warning" @click="openBatchDialog(row)">批量执行</el-button>
-          <el-button link type="primary" @click="openAdvance(row)" :disabled="row.status === '已完成'">阶段推进</el-button>
+          <el-button v-if="row.status !== '已完成'" link type="primary" @click="openAdvance(row)">阶段推进</el-button>
+          <el-button v-else link type="warning" @click="reopen(row)">重新打开</el-button>
           <el-button link type="primary" @click="openStageTimes(row)">阶段时间</el-button>
           <el-button link type="primary" @click="openScope(row)">用例范围</el-button>
           <el-dropdown @command="(fmt) => exportReport(row, fmt)">
@@ -515,7 +613,7 @@ async function clearScope() {
     </el-dialog>
 
     <!-- 阶段推进 -->
-    <el-dialog v-model="advanceVisible" :title="`阶段推进 - ${advancePlan?.version || ''}`" width="560px">
+    <el-dialog v-model="advanceVisible" :title="`阶段推进 - ${advancePlan?.version || ''}`" width="680px">
       <div v-loading="advanceLoading">
         <el-alert
           v-if="advanceProgress"
@@ -525,10 +623,10 @@ async function clearScope() {
           show-icon
           style="margin-bottom: 16px"
         >
-          <span>可灵活推进到任意后续阶段，无需当前阶段 100% 通过</span>
+          <span>可灵活推进到任意后续阶段;推进/完成时按"阶段门禁"配置校验,未达标需管理员强制通过</span>
         </el-alert>
 
-        <el-form v-if="advanceProgress" label-width="80px" style="margin-bottom: 16px">
+        <el-form v-if="advanceProgress" label-width="80px" style="margin-bottom: 8px">
           <el-form-item label="目标阶段">
             <el-select v-model="targetStage" placeholder="不选则推进到下一阶段" style="width: 100%">
               <el-option
@@ -541,6 +639,37 @@ async function clearScope() {
             </el-select>
           </el-form-item>
         </el-form>
+
+        <div v-loading="gateLoading" style="min-height: 60px">
+          <div v-for="g in [gateOut, gateIn].filter(Boolean)" :key="g.stage + g.kind" class="gate-block">
+            <div class="gate-head">
+              <span class="gate-title">{{ stageLabel(g.stage) }} · {{ g.kind }}</span>
+              <el-tag v-if="!g.configured" type="info" size="small">未配置规则</el-tag>
+              <el-tag v-else :type="g.passed ? 'success' : 'danger'" size="small">
+                {{ g.passed ? '达标' : '未达标' }}
+              </el-tag>
+            </div>
+            <div v-if="g.configured" class="gate-items">
+              <div v-for="it in g.items" :key="it.rule" class="gate-item" :class="{ bad: !it.ok }">
+                <el-icon :color="it.ok ? '#67c23a' : '#f56c6c'">
+                  <component :is="it.ok ? 'CircleCheck' : 'CircleClose'" />
+                </el-icon>
+                <span class="gate-label">{{ it.label }}</span>
+                <span class="gate-expected">要求 {{ it.expected }}</span>
+                <span class="gate-actual">实际 {{ it.actual }}</span>
+              </div>
+            </div>
+            <div v-else class="gate-empty">该项目未为此阶段配置{{ g.kind }}规则,不做校验</div>
+          </div>
+        </div>
+
+        <el-alert v-if="gateConfigured && !gatePassed && !isAdmin" type="warning" :closable="false" show-icon
+          style="margin-top: 8px" title="门禁未达标,仅管理员可强制推进或强制完成" />
+        <div v-if="gateConfigured && !gatePassed && isAdmin" style="margin-top: 10px">
+          <el-checkbox v-model="forceOn">门禁未达标,强制推进/完成(记录到操作日志)</el-checkbox>
+          <el-input v-if="forceOn" v-model="forceReason" type="textarea" :rows="2"
+            placeholder="强制理由(必填),例如:业务方同意带风险进入 UAT" style="margin-top: 6px" />
+        </div>
 
         <div v-if="advanceProgress" class="stages">
           <div v-for="st in STAGES" :key="st" class="stage-row">
@@ -558,8 +687,13 @@ async function clearScope() {
       <template #footer>
         <el-button @click="advanceVisible = false">关闭</el-button>
         <el-button
-          type="primary"
+          type="success"
           :disabled="!advanceProgress"
+          @click="doComplete"
+        >标记完成</el-button>
+        <el-button
+          type="primary"
+          :disabled="!advanceProgress || !effectiveTarget"
           @click="doAdvance"
         >确认推进</el-button>
       </template>
@@ -734,6 +868,46 @@ async function clearScope() {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  margin-top: 16px;
+}
+.gate-block {
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+.gate-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.gate-title {
+  font-weight: 600;
+  font-size: 13px;
+}
+.gate-items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.gate-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #606266;
+}
+.gate-item.bad .gate-actual {
+  color: #f56c6c;
+  font-weight: 600;
+}
+.gate-expected {
+  color: #909399;
+}
+.gate-empty {
+  font-size: 12px;
+  color: #909399;
 }
 .stage-row {
   border: 1px solid #ebeef5;

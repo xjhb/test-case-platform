@@ -235,6 +235,8 @@ class StageTimeUpdate(BaseModel):
 class StageAdvance(BaseModel):
     """阶段推进请求，支持跳转到任意阶段"""
     target_stage: str | None = None  # 目标阶段，不传则推进到下一阶段
+    force: bool = False  # 门禁未达标时强制推进(仅管理员)
+    reason: str = ""  # 强制推进理由,写入操作日志
 
 
 class PlanCasesPayload(BaseModel):
@@ -663,3 +665,37 @@ class CustomFieldValueOut(BaseModel):
     field_type: str = ""
     testcase_id: int
     value: str
+
+
+# ===================== 阶段门禁 =====================
+class StageGateCreate(BaseModel):
+    project_id: int
+    stage: str  # SIT/UAT/PRE
+    kind: str  # 准入/准出
+    rule: str
+    threshold: int = 0
+    enabled: bool = True
+
+
+class StageGateUpdate(BaseModel):
+    stage: str | None = None
+    kind: str | None = None
+    rule: str | None = None
+    threshold: int | None = None
+    enabled: bool | None = None
+
+
+class StageGateOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    project_id: int
+    stage: str
+    kind: str
+    rule: str
+    rule_label: str = ""
+    unit: str = ""
+    op: str = ""
+    hint: str = ""
+    threshold: int
+    enabled: bool
+    updated_at: datetime

@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..deps import accessible_project_ids, get_current_user, require_project_access
+from ..gates import evaluate, failures_text
 from ..logger import log_op
 from ..models import (
     Defect,
@@ -217,18 +218,81 @@ def advance(plan_id: int, payload: StageAdvance | None = None, db: Session = Dep
     if STAGE_ORDER.index(target_stage) <= STAGE_ORDER.index(current_stage):
         raise HTTPException(status_code=400, detail="只能向前推进,不能回退")
 
-    # 如果跳转到 PRE 或跳过中间阶段，标记计划为完成（如果目标是 PRE 之后）
-    if target_stage == "PRE":
-        # 推进到 PRE，不自动完成，让用户在 PRE 执行完后再手动完成
-        plan.current_stage = target_stage
-    else:
-        plan.current_stage = target_stage
+    # 门禁:离开当前阶段要过"准出",进入目标阶段要过"准入"
+    checks = [evaluate(db, plan, current_stage, "准出"), evaluate(db, plan, target_stage, "准入")]
+    unmet = [c for c in checks if not c["passed"]]
+    forced = False
+    if unmet:
+        if not (payload and payload.force):
+            raise HTTPException(status_code=400, detail="门禁未达标:" + failures_text(unmet))
+        if current.role != "admin":
+            raise HTTPException(status_code=403, detail="门禁未达标,仅管理员可强制推进")
+        if not (payload.reason or "").strip():
+            raise HTTPException(status_code=400, detail="强制推进必须填写理由")
+        forced = True
+
+    plan.current_stage = target_stage
 
     db.commit()
     db.refresh(plan)
-    log_op(db, current, "推进", target=f"计划#{plan.id} {plan.version}",
-           detail=f"{current_stage} -> {plan.current_stage}")
-    return {"id": plan.id, "current_stage": plan.current_stage, "status": plan.status}
+    log_op(db, current, "强制推进" if forced else "推进", target=f"计划#{plan.id} {plan.version}",
+           detail=f"{current_stage} -> {plan.current_stage}"
+                  + (f" | 门禁未达标:{failures_text(unmet)} | 理由:{payload.reason.strip()}" if forced else ""))
+    return {
+        "id": plan.id,
+        "current_stage": plan.current_stage,
+        "status": plan.status,
+        "forced": forced,
+        "gate": {"passed": not unmet, "failures": failures_text(unmet)},
+    }
+
+
+@router.post("/{plan_id}/complete")
+def complete_plan(plan_id: int, payload: StageAdvance | None = None, db: Session = Depends(get_db),
+                  current: User = Depends(get_current_user)):
+    """标记计划完成:需通过当前阶段准出门禁,管理员可带理由强制完成"""
+    plan = db.get(TestPlan, plan_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="计划不存在")
+    require_project_access(plan.project_id, db, current)
+    if plan.status == "已完成":
+        raise HTTPException(status_code=400, detail="计划已是完成状态")
+
+    result = evaluate(db, plan, plan.current_stage, "准出")
+    forced = False
+    if not result["passed"]:
+        if not (payload and payload.force):
+            raise HTTPException(status_code=400, detail="准出门禁未达标:" + failures_text([result]))
+        if current.role != "admin":
+            raise HTTPException(status_code=403, detail="门禁未达标,仅管理员可强制完成")
+        if not (payload.reason or "").strip():
+            raise HTTPException(status_code=400, detail="强制完成必须填写理由")
+        forced = True
+
+    plan.status = "已完成"
+    db.commit()
+    db.refresh(plan)
+    log_op(db, current, "强制完成" if forced else "完成", target=f"计划#{plan.id} {plan.version}",
+           detail=f"阶段{plan.current_stage}"
+                  + (f" | 门禁未达标:{failures_text([result])} | 理由:{payload.reason.strip()}" if forced else ""))
+    return {"id": plan.id, "status": plan.status, "forced": forced,
+            "gate": {"passed": result["passed"], "failures": failures_text([result])}}
+
+
+@router.post("/{plan_id}/reopen")
+def reopen_plan(plan_id: int, db: Session = Depends(get_db), current: User = Depends(get_current_user)):
+    """误标记完成时回退到进行中"""
+    plan = db.get(TestPlan, plan_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="计划不存在")
+    require_project_access(plan.project_id, db, current)
+    if plan.status != "已完成":
+        raise HTTPException(status_code=400, detail="计划未处于完成状态")
+    plan.status = "进行中"
+    db.commit()
+    db.refresh(plan)
+    log_op(db, current, "重新打开", target=f"计划#{plan.id} {plan.version}", detail=f"阶段{plan.current_stage}")
+    return {"id": plan.id, "status": plan.status}
 
 
 @router.get("/{plan_id}/cases")

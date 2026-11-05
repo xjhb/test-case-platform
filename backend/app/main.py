@@ -18,7 +18,7 @@ from . import models  # noqa: F401  确保模型注册
 from .config import settings
 from .database import Base, engine
 from .notify import start_stage_scheduler
-from .routers import auth, automation, defects, imports, integrations, logs, notifications, p2_features, plans, projects, requirements, reports, runs, stats, system, teams, testcases, todo, uploads, users, versions
+from .routers import auth, automation, defects, gates, imports, integrations, logs, notifications, p2_features, plans, projects, requirements, reports, runs, stats, system, teams, testcases, todo, uploads, users, versions
 from .seed import seed_admin
 
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
@@ -318,6 +318,7 @@ app.include_router(teams.router)
 app.include_router(system.router)
 app.include_router(integrations.router)
 app.include_router(todo.router)
+app.include_router(gates.router)
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")

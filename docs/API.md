@@ -29,6 +29,7 @@
 - [19. 外部集成 `/api/integrations`](#19-外部集成)
 - [20. 自动化集成 `/api/automation`](#20-自动化集成)
 - [21. 我的待办 `/api/todo`](#21-我的待办)
+- [22. 阶段门禁 `/api/gates`](#22-阶段门禁)
 
 ---
 
@@ -139,7 +140,11 @@
 | POST | `` | 创建计划 | 项目成员 |
 | GET | `/calendar` | 日历视图 | 已登录 |
 | GET | `/{id}/progress` | 计划进度 | 项目成员 |
-| POST | `/{id}/advance` | 推进阶段 | 项目成员 |
+| POST | `/{id}/advance` | 推进阶段(校验阶段门禁) | 项目成员;强制推进需 Admin |
+| POST | `/{id}/complete` | 标记计划完成(校验当前阶段准出门禁) | 项目成员;强制完成需 Admin |
+| POST | `/{id}/reopen` | 重新打开已完成计划 | 项目成员 |
+| GET | `/{id}/cases` | 计划圈选的用例范围 | 项目成员 |
+| POST | `/{id}/cases` | 圈选/追加/清空用例范围 | 项目成员 |
 | PUT | `/{id}/stage-times` | 修改阶段时间 | 项目成员 |
 | GET | `/{id}/countdown` | 阶段倒计时 | 项目成员 |
 | DELETE | `/{id}` | 删除计划 | 项目成员 |
@@ -660,6 +665,62 @@
 > 达到上限时 `plan_scanned = true`,前端会提示仅统计最近的批次。
 > 待执行的判定与 `GET /api/plans/{id}/progress` 同源:以计划圈选范围(未圈选回退项目全部用例)
 > 为分母,按该阶段最近一次执行结果是否为空计算。
+
+---
+
+## 22. 阶段门禁
+
+**前缀**: `/api/gates`
+
+按项目配置阶段准入/准出规则。推进阶段时校验「当前阶段准出 + 目标阶段准入」,
+标记完成时校验「当前阶段准出」;未配置规则表示不限制。
+
+| 方法 | 路径 | 说明 | 权限 |
+|------|------|------|------|
+| GET | `/rules` | 规则目录(前端渲染配置项) | 已登录 |
+| GET | `` | 项目门禁列表 `?project_id&stage&kind` | 项目成员 |
+| POST | `` | 新建门禁规则 | 项目成员 |
+| PUT | `/{id}` | 修改阈值/阶段/类型/启停 | 项目成员 |
+| DELETE | `/{id}` | 删除门禁规则 | 项目成员 |
+| GET | `/check` | 校验计划门禁 `?plan_id&stage&kind` | 项目成员 |
+
+### 规则清单
+
+| key | 含义 | 方向 |
+|-----|------|------|
+| `case_total_min` | 纳入用例数不少于(条) | `>=` |
+| `executed_rate_min` | 执行率不低于(%) | `>=` |
+| `pass_rate_min` | 通过率不低于(%) | `>=` |
+| `failed_max` | 失败用例不超过(条) | `<=` |
+| `blocked_max` | 阻塞用例不超过(条) | `<=` |
+| `pending_max` | 未执行用例不超过(条) | `<=` |
+| `review_approved_min` | 评审通过率不低于(%) | `>=` |
+| `open_defects_max` | 未关闭缺陷不超过(个) | `<=` |
+| `open_critical_defects_max` | 未关闭致命/严重缺陷不超过(个) | `<=` |
+
+指标口径与 `GET /api/plans/{id}/progress` 完全一致:分母是计划圈选的用例(未圈选回退项目全部用例),
+执行结果取该阶段每条用例的最近一次记录;缺陷统计覆盖本计划或本范围内用例。
+
+### POST /api/plans/{id}/advance
+
+**请求体**:
+```json
+{ "target_stage": "UAT", "force": false, "reason": "" }
+```
+
+- 门禁未达标且 `force=false` → `400 门禁未达标:[UAT·准入] 通过率不低于 >= 95%,实际 66.7%`
+- 门禁未达标且 `force=true`:非管理员 → `403`;`reason` 为空 → `400`
+- 强制推进成功时 `forced=true`,操作日志记录未达标明细与理由
+
+**响应**:
+```json
+{ "id": 30, "current_stage": "UAT", "status": "进行中", "forced": true,
+  "gate": { "passed": false, "failures": "[SIT·准出] 通过率不低于 >= 100%,实际 66.7%" } }
+```
+
+### POST /api/plans/{id}/complete
+
+请求体同上(只需 `force`/`reason`),按当前阶段准出校验;`/{id}/reopen` 把已完成计划退回进行中并留痕。
 
 ---
 
