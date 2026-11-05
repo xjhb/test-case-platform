@@ -16,6 +16,12 @@ const routes = [
         meta: { title: '驾驶舱' },
       },
       {
+        path: 'todo',
+        name: 'todo',
+        component: () => import('../views/MyTodo.vue'),
+        meta: { title: '我的待办' },
+      },
+      {
         path: 'projects',
         name: 'projects',
         component: () => import('../views/Projects.vue'),

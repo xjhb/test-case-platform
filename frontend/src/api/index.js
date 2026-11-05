@@ -157,6 +157,11 @@ export const notificationApi = {
   scanStage: () => request.post('/notifications/scan-stage'),
 }
 
+// ---- 我的待办 ----
+export const todoApi = {
+  summary: () => request.get('/todo/summary'),
+}
+
 // ---- 用例版本 ----
 export const versionApi = {
   list: (testcaseId) => request.get(`/testcases/${testcaseId}/versions`),

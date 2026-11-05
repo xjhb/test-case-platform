@@ -158,7 +158,13 @@ def assign_project_role(
         existing.role = payload.role
     else:
         db.add(ProjectRole(user_id=payload.user_id, project_id=pid, role=payload.role))
-        # 同时加入 user_projects 关联
+    # 同步项目成员关系;已经是成员时不能重复插入,否则主键冲突报 500
+    is_member = db.execute(
+        select(user_projects.c.user_id).where(
+            user_projects.c.user_id == payload.user_id, user_projects.c.project_id == pid
+        )
+    ).scalar_one_or_none()
+    if is_member is None:
         db.execute(user_projects.insert().values(user_id=payload.user_id, project_id=pid))
     db.commit()
     log_op(db, current, "分配", target=f"项目#{pid}角色", detail=f"用户#{payload.user_id} -> {payload.role}")

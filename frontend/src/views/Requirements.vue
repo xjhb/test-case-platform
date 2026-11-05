@@ -3,8 +3,8 @@
     <div class="page-header">
       <h2>需求管理</h2>
       <el-radio-group v-model="viewMode" size="large">
-        <el-radio-button label="list">需求列表</el-radio-button>
-        <el-radio-button label="matrix">覆盖率矩阵</el-radio-button>
+        <el-radio-button value="list">需求列表</el-radio-button>
+        <el-radio-button value="matrix">覆盖率矩阵</el-radio-button>
       </el-radio-group>
     </div>
 

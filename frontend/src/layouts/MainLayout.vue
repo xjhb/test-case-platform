@@ -118,6 +118,10 @@ onBeforeUnmount(() => {
           <el-icon><DataAnalysis /></el-icon>
           <span>驾驶舱</span>
         </el-menu-item>
+        <el-menu-item index="/todo">
+          <el-icon><Bell /></el-icon>
+          <span>我的待办</span>
+        </el-menu-item>
         <el-sub-menu index="func-test">
           <template #title>
             <el-icon><FolderOpened /></el-icon>

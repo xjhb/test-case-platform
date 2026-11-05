@@ -28,6 +28,7 @@
 - [18. P2 功能 `/api/p2`](#18-p2-功能)
 - [19. 外部集成 `/api/integrations`](#19-外部集成)
 - [20. 自动化集成 `/api/automation`](#20-自动化集成)
+- [21. 我的待办 `/api/todo`](#21-我的待办)
 
 ---
 
@@ -529,6 +530,50 @@
   ]
 }
 ```
+
+---
+
+## 21. 我的待办
+
+**前缀**: `/api/todo`
+
+| 方法 | 路径 | 说明 | 权限 |
+|------|------|------|------|
+| GET | `/summary` | 当前用户的待办聚合 | 已登录 |
+
+聚合的六类待办(全部只读,统计口径与各自模块一致):
+
+| 字段 | 含义 | 判定条件 |
+|------|------|---------|
+| `review_cases` | 待我评审的用例 | `reviewer_id = 我` 且 评审状态为 评审中 |
+| `rejected_cases` | 被驳回、需我修改的用例 | `created_by = 我` 且 评审状态为 已驳回 |
+| `my_defects` | 指派给我的未修复缺陷 | `assignee_id = 我` 且 状态在 新建/处理中/重新打开 |
+| `verify_defects` | 待我验证的缺陷 | `reporter_id = 我` 且 状态为 已修复 |
+| `my_plans` | 我负责的批次进度 | 批次进行中且(我是创建人 或 我在该项目为 测试负责人/项目经理) |
+| `pending_cases` | 负责批次当前阶段待执行用例 | 批次范围内还没有该阶段执行记录的用例 |
+
+**响应示例**:
+```json
+{
+  "review_cases": [{ "id": 77, "title": "...", "project_id": 1, "project_name": "test1", "priority": "P0", "submitted_at": "2026-11-05 09:40", "link": "/testcases?project_id=1&focus=77" }],
+  "rejected_cases": [{ "id": 78, "title": "...", "comment": "预期结果缺失,请补充", "link": "/testcases?project_id=1&focus=78" }],
+  "my_defects": [{ "id": 45, "title": "...", "severity": "致命", "status": "新建", "link": "/defects?focus=45" }],
+  "verify_defects": [{ "id": 46, "title": "...", "resolved_at": "2026-11-05 09:40", "link": "/defects?focus=46" }],
+  "my_plans": [{ "id": 20, "project_id": 1, "project_name": "test1", "version": "v1.0", "current_stage": "UAT", "stage_end": "2026-11-10 10:47", "remain_days": 5, "overdue": false, "total": 12, "pending": 3, "failed": 0, "link": "/plans?project_id=1&focus=20&stage=UAT" }],
+  "pending_cases": [{ "id": 15, "title": "...", "plan_id": 7, "plan_version": "v1", "stage": "UAT", "priority": "P0", "link": "/plans?project_id=9&focus=7&stage=UAT" }],
+  "unread_notifications": 3,
+  "counts": { "review_cases": 1, "rejected_cases": 1, "my_defects": 1, "verify_defects": 1, "pending_cases": 8, "my_plans": 3 },
+  "total": 12,
+  "plan_scanned": false
+}
+```
+
+> 每条待办都带 `link`,即前端路由的深链参数,点击后直接落到对应页面并展开详情。
+> 数据按当前用户可访问的项目过滤,非所属项目的缺陷/用例不会出现在待办里。
+> `counts` 是真实总数,列表每类最多返回 50 条;批次最多统计 20 个,
+> 达到上限时 `plan_scanned = true`,前端会提示仅统计最近的批次。
+> 待执行的判定与 `GET /api/plans/{id}/progress` 同源:以计划圈选范围(未圈选回退项目全部用例)
+> 为分母,按该阶段最近一次执行结果是否为空计算。
 
 ---
 
