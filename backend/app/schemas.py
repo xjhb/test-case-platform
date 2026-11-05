@@ -386,6 +386,21 @@ class DefectOut(BaseModel):
     updated_at: datetime
     resolved_at: datetime | None = None
     closed_at: datetime | None = None
+    attachment_count: int = 0
+
+
+class DefectAttachmentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    defect_id: int
+    original_name: str
+    content_type: str
+    size: int
+    uploaded_by: int | None = None
+    uploaded_by_name: str = ""
+    uploaded_at: datetime
+    url: str = ""
+    can_delete: bool = False
 
 
 # ---------- 用例版本 ----------

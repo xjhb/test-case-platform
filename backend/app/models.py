@@ -228,6 +228,21 @@ class Defect(Base):
     closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+class DefectAttachment(Base):
+    """缺陷附件(日志、截图、文档等),文件落在 uploads/defects 下"""
+
+    __tablename__ = "defect_attachments"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    defect_id: Mapped[int] = mapped_column(ForeignKey("defects.id", ondelete="CASCADE"), index=True)
+    stored_name: Mapped[str] = mapped_column(String(255))  # 磁盘上的文件名
+    original_name: Mapped[str] = mapped_column(String(255))  # 上传时的原始文件名
+    content_type: Mapped[str] = mapped_column(String(128), default="")
+    size: Mapped[int] = mapped_column(default=0)
+    uploaded_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
 class TestCaseVersion(Base):
     __tablename__ = "testcase_versions"
 

@@ -41,8 +41,17 @@
       <el-table-column prop="created_at" label="创建时间" width="160">
         <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="240" fixed="right">
+      <el-table-column label="操作" width="330" fixed="right">
         <template #default="{ row }">
+          <el-dropdown v-if="nextStatuses(row).length" trigger="click" @command="(s) => changeStatus(row, s)">
+            <el-button size="small" type="primary" plain>流转</el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item v-for="s in nextStatuses(row)" :key="s" :command="s">{{ s }}</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+          <el-button size="small" @click="showAttachments(row)">附件{{ attachmentCounts[row.id] ? `(${attachmentCounts[row.id]})` : '' }}</el-button>
           <el-button size="small" @click="showTrace(row)">来源</el-button>
           <el-button size="small" @click="showEditDialog(row)">编辑</el-button>
           <el-button size="small" type="danger" @click="handleDelete(row)" v-if="role === 'admin'">删除</el-button>
@@ -95,8 +104,9 @@
         </el-form-item>
         <el-form-item label="状态" v-if="isEdit">
           <el-select v-model="form.status" style="width: 100%">
-            <el-option v-for="s in statusOptions" :key="s" :label="s" :value="s" />
+            <el-option v-for="s in editStatusOptions" :key="s" :label="s" :value="s" />
           </el-select>
+          <div class="form-tip">当前状态「{{ originalStatus }}」,按状态机只可流转到: {{ nextStatuses({ status: originalStatus }).join('、') || '无' }}。管理员可强制流转。</div>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -158,6 +168,57 @@
         <el-button @click="traceVisible = false">关闭</el-button>
       </template>
     </el-dialog>
+
+    <!-- 缺陷附件 -->
+    <el-dialog v-model="attachVisible" :title="attachTitle" width="720px">
+      <div v-loading="attachLoading">
+        <el-upload
+          :show-file-list="false"
+          :http-request="handleUpload"
+          :before-upload="beforeUpload"
+          multiple
+          drag
+          class="attach-upload"
+        >
+          <div class="attach-drop">
+            <div>将日志、截图、文档拖到此处,或<em>点击上传</em></div>
+            <div class="attach-tip">单个附件不超过 20MB,支持 png/jpg/gif/webp/txt/log/csv/json/xml/har/pdf/office/压缩包</div>
+          </div>
+        </el-upload>
+
+        <el-table :data="attachments" size="small" stripe style="margin-top: 12px">
+          <el-table-column label="文件名" min-width="220" show-overflow-tooltip>
+            <template #default="{ row }">
+              <el-image
+                v-if="isImage(row)"
+                :src="row.url"
+                :preview-src-list="[row.url]"
+                fit="cover"
+                style="width: 28px; height: 28px; margin-right: 8px; vertical-align: middle"
+              />
+              <span style="vertical-align: middle">{{ row.original_name }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="大小" width="100">
+            <template #default="{ row }">{{ formatSize(row.size) }}</template>
+          </el-table-column>
+          <el-table-column prop="uploaded_by_name" label="上传人" width="100" />
+          <el-table-column label="上传时间" width="160">
+            <template #default="{ row }">{{ formatDate(row.uploaded_at) }}</template>
+          </el-table-column>
+          <el-table-column label="操作" width="130" fixed="right">
+            <template #default="{ row }">
+              <el-button size="small" @click="handleDownload(row)">下载</el-button>
+              <el-button size="small" type="danger" @click="handleDeleteAttachment(row)" v-if="canDeleteAttachment(row)">删除</el-button>
+            </template>
+          </el-table-column>
+          <template #empty>暂无附件</template>
+        </el-table>
+      </div>
+      <template #footer>
+        <el-button @click="attachVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -206,6 +267,35 @@ const form = reactive({
 })
 
 const testcaseOptions = ref([])
+
+// ---- 状态机 ----
+const statusTransitions = ref({})
+const originalStatus = ref('')
+
+const loadStatusFlow = async () => {
+  try {
+    const res = await defectApi.statusFlow()
+    statusTransitions.value = res.transitions || {}
+  } catch (e) { console.error(e) }
+}
+
+const nextStatuses = (row) => statusTransitions.value[row?.status] || []
+
+const editStatusOptions = computed(() => {
+  if (!originalStatus.value) return statusOptions
+  if (role.value === 'admin') return statusOptions
+  return [originalStatus.value, ...nextStatuses({ status: originalStatus.value })]
+})
+
+const changeStatus = async (row, status) => {
+  try {
+    await defectApi.update(row.id, { status })
+    ElMessage.success(`已流转到「${status}」`)
+    loadData()
+  } catch (e) {
+    console.error(e)
+  }
+}
 
 const loadProjectTestcases = async (pid) => {
   testcaseOptions.value = []
@@ -265,6 +355,7 @@ const loadUsers = async () => {
 
 const showCreateDialog = () => {
   isEdit.value = false
+  originalStatus.value = ''
   Object.assign(form, { title: '', description: '', severity: '一般', priority: 'P1', project_id: null, testcase_id: null, assignee_id: null, status: '新建' })
   testcaseOptions.value = []
   dialogVisible.value = true
@@ -272,6 +363,7 @@ const showCreateDialog = () => {
 
 const showEditDialog = (row) => {
   isEdit.value = true
+  originalStatus.value = row.status
   Object.assign(form, { ...row })
   dialogVisible.value = true
 }
@@ -375,9 +467,101 @@ const handlePush = async (system) => {
   }
 }
 
+// ---- 附件 ----
+const attachVisible = ref(false)
+const attachLoading = ref(false)
+const attachTitle = ref('')
+const attachRow = ref(null)
+const attachments = ref([])
+const attachmentCounts = computed(() => {
+  const map = {}
+  defects.value.forEach((d) => { if (d.attachment_count) map[d.id] = d.attachment_count })
+  return map
+})
+
+const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp']
+const isImage = (row) => IMAGE_EXTS.includes((row.original_name || '').split('.').pop().toLowerCase())
+
+const formatSize = (n) => {
+  if (!n) return '0 B'
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / 1024 / 1024).toFixed(1)} MB`
+}
+
+const canDeleteAttachment = (row) => row.can_delete
+
+const loadAttachments = async () => {
+  if (!attachRow.value) return
+  attachLoading.value = true
+  try {
+    attachments.value = await defectApi.attachments(attachRow.value.id)
+  } catch (e) {
+    console.error(e)
+  } finally {
+    attachLoading.value = false
+  }
+}
+
+const showAttachments = (row) => {
+  attachRow.value = row
+  attachTitle.value = `缺陷附件 - ${row.title}`
+  attachments.value = []
+  attachVisible.value = true
+  loadAttachments()
+}
+
+const beforeUpload = (file) => {
+  if (file.size > 20 * 1024 * 1024) {
+    ElMessage.warning('附件不能超过 20MB')
+    return false
+  }
+  return true
+}
+
+const handleUpload = async ({ file }) => {
+  if (!attachRow.value) return
+  try {
+    await defectApi.uploadAttachment(attachRow.value.id, file)
+    ElMessage.success(`${file.name} 上传成功`)
+    await Promise.all([loadAttachments(), loadData()])
+  } catch (e) {
+    console.error(e)
+  }
+}
+
+const handleDownload = async (row) => {
+  try {
+    const blob = await defectApi.downloadAttachment(row.id)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = row.original_name
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    // 附件文件丢失时后端返回 404,拦截器拿不到 detail(blob),这里兜底提示
+    ElMessage.error('下载失败,附件文件可能已丢失')
+  }
+}
+
+const handleDeleteAttachment = async (row) => {
+  try {
+    await ElMessageBox.confirm(`确定删除附件「${row.original_name}」?`, '提示', { type: 'warning' })
+    await defectApi.deleteAttachment(row.id)
+    ElMessage.success('删除成功')
+    await Promise.all([loadAttachments(), loadData()])
+  } catch (e) {
+    if (e !== 'cancel') console.error(e)
+  }
+}
+
 onMounted(async () => {
   loadProjects()
   loadUsers()
+  loadStatusFlow()
   await loadData()
   // 通知里的"查看详情"带 focus=<缺陷ID>,直接打开来源追溯
   const focus = Number(route.query.focus)
@@ -422,5 +606,26 @@ onMounted(async () => {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+}
+.form-tip {
+  color: #909399;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.attach-upload {
+  width: 100%;
+}
+.attach-drop {
+  padding: 8px 0;
+  color: #606266;
+}
+.attach-drop em {
+  color: #409eff;
+  font-style: normal;
+}
+.attach-tip {
+  margin-top: 6px;
+  color: #909399;
+  font-size: 12px;
 }
 </style>

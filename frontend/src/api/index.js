@@ -146,6 +146,15 @@ export const defectApi = {
   remove: (id) => request.delete(`/defects/${id}`),
   stats: (params) => request.get('/defects/stats/summary', { params }),
   traceability: (id) => request.get(`/defects/${id}/traceability`),
+  statusFlow: () => request.get('/defects/status-flow'),
+  attachments: (id) => request.get(`/defects/${id}/attachments`),
+  uploadAttachment: (id, file) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    return request.post(`/defects/${id}/attachments`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+  },
+  deleteAttachment: (attId) => request.delete(`/defects/attachments/${attId}`),
+  downloadAttachment: (attId) => request.get(`/defects/attachments/${attId}/download`, { responseType: 'blob' }),
 }
 
 // ---- 通知 ----
