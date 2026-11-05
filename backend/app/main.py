@@ -231,6 +231,42 @@ def migrate():
                 FOREIGN KEY (testcase_id) REFERENCES testcases(id) ON DELETE CASCADE
             )
         """))
+        # ===================== 补齐 ALTER 加列时遗漏的外键约束 =====================
+        # 上面用 ALTER TABLE ADD COLUMN 补的列没有 FK,历史上删除父行会留下孤儿引用,
+        # 也导致模型里的 ondelete=CASCADE/SET NULL 在数据库层失效。先清孤儿,再补建约束。
+        fk_repairs = [
+            ("testruns", "plan_id", "testplans", "CASCADE"),
+            ("testruns", "round_id", "test_rounds", "SET NULL"),
+            ("defects", "run_id", "testruns", "SET NULL"),
+            ("testcases", "reviewer_id", "users", "SET NULL"),
+            ("testcases", "folder_id", "testcase_folders", "SET NULL"),
+        ]
+        for tbl, col, ref, rule in fk_repairs:
+            try:
+                exists = conn.execute(
+                    text(
+                        "SELECT 1 FROM information_schema.KEY_COLUMN_USAGE "
+                        "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=:tbl AND COLUMN_NAME=:col "
+                        "AND REFERENCED_TABLE_NAME IS NOT NULL"
+                    ),
+                    {"tbl": tbl, "col": col},
+                ).fetchone()
+                if exists:
+                    continue
+                conn.execute(
+                    text(
+                        f"UPDATE {tbl} x LEFT JOIN {ref} y ON x.{col}=y.id "
+                        f"SET x.{col}=NULL WHERE x.{col} IS NOT NULL AND y.id IS NULL"
+                    )
+                )
+                conn.execute(
+                    text(
+                        f"ALTER TABLE {tbl} ADD CONSTRAINT fk_{tbl}_{col} "
+                        f"FOREIGN KEY ({col}) REFERENCES {ref}(id) ON DELETE SET NULL"
+                    )
+                )
+            except Exception as e:  # 约束补建失败不应阻塞启动
+                print(f"[migrate] 外键 {tbl}.{col} 补建跳过: {e}")
         conn.commit()
 
 

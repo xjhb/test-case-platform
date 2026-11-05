@@ -5,6 +5,91 @@
       <el-tag type="success" size="large">API文档</el-tag>
     </div>
 
+    <el-card class="import-card">
+      <template #header>
+        <div class="card-header">
+          <span>JUnit XML 结果导入</span>
+          <span class="header-tip">上传 CI 产出的 results.xml,按用例标题或编号(如 TC-1024)匹配计划内用例后写入执行记录</span>
+        </div>
+      </template>
+
+      <el-form :inline="true" class="import-form">
+        <el-form-item label="项目">
+          <el-select v-model="form.project_id" placeholder="选择项目" style="width: 180px" @change="form.plan_id = null">
+            <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="测试计划">
+          <el-select v-model="form.plan_id" placeholder="选择批次" style="width: 200px">
+            <el-option
+              v-for="pl in planOptions"
+              :key="pl.id"
+              :label="`#${pl.id} ${pl.version} (${pl.current_stage}/${pl.status})`"
+              :value="pl.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="阶段">
+          <el-select v-model="form.stage" style="width: 100px">
+            <el-option v-for="s in ['SIT', 'UAT', 'PRE']" :key="s" :label="s" :value="s" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="框架">
+          <el-input v-model="form.framework" placeholder="Selenium/Playwright" style="width: 150px" />
+        </el-form-item>
+        <el-form-item label="构建号">
+          <el-input v-model="form.build_number" placeholder="如 128" style="width: 110px" />
+        </el-form-item>
+        <el-form-item label="仅预览不落库">
+          <el-switch v-model="form.dry_run" />
+        </el-form-item>
+      </el-form>
+
+      <el-upload
+        drag
+        multiple
+        accept=".xml"
+        :auto-upload="false"
+        v-model:file-list="fileList"
+        class="xml-upload"
+      >
+        <div class="upload-tip">拖拽或点击选择 JUnit XML 文件(单次最多 20 个,单个不超过 10MB)</div>
+      </el-upload>
+
+      <div class="import-actions">
+        <el-button :disabled="!canSubmit" :loading="importing" @click="submit(true)">解析预览</el-button>
+        <el-button type="primary" :disabled="!canSubmit || form.dry_run" :loading="importing" @click="submit(false)">导入执行结果</el-button>
+        <el-button v-if="fileList.length" @click="fileList = []">清空文件</el-button>
+      </div>
+
+      <div v-if="report" class="report">
+        <div class="report-summary">
+          <el-tag>解析 {{ report.total }} 条</el-tag>
+          <el-tag type="success">匹配 {{ report.matched }} 条</el-tag>
+          <el-tag type="warning">未匹配 {{ report.unmatched_total }} 条</el-tag>
+          <el-tag v-if="!report.dry_run" type="primary">写入 {{ report.imported }} 条</el-tag>
+          <el-tag v-for="(n, s) in report.by_status" :key="s" :type="statusTag(s)" effect="plain">{{ s }} {{ n }}</el-tag>
+        </div>
+        <el-alert v-if="report.dry_run" type="info" :closable="false" show-icon title="预览模式: 只解析和匹配,未写入任何执行记录" />
+        <el-alert
+          v-for="(e, i) in report.file_errors"
+          :key="'e' + i"
+          type="error"
+          :closable="false"
+          show-icon
+          :title="`${e.file}: ${e.error}`"
+        />
+        <el-table v-if="report.unmatched.length" :data="report.unmatched" size="small" stripe style="margin-top: 12px">
+          <el-table-column prop="name" label="XML 中的用例名" min-width="220" show-overflow-tooltip />
+          <el-table-column prop="file" label="来源文件" width="160" show-overflow-tooltip />
+          <el-table-column prop="status" label="结果" width="80">
+            <template #default="{ row }"><el-tag :type="statusTag(row.status)" size="small">{{ row.status }}</el-tag></template>
+          </el-table-column>
+          <el-table-column prop="reason" label="未匹配原因" min-width="220" show-overflow-tooltip />
+        </el-table>
+      </div>
+    </el-card>
+
     <el-card v-loading="loading" class="guide-card">
       <template #header>
         <div class="card-header">
@@ -80,13 +165,71 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { automationApi } from '../api'
+import { automationApi, planApi, projectApi } from '../api'
 
 const loading = ref(false)
 const guide = ref(null)
 const activeTab = ref('curl')
+
+const projects = ref([])
+const plans = ref([])
+const fileList = ref([])
+const importing = ref(false)
+const report = ref(null)
+
+const form = reactive({
+  project_id: null,
+  plan_id: null,
+  stage: 'SIT',
+  framework: '',
+  build_number: '',
+  dry_run: false,
+})
+
+const planOptions = computed(() =>
+  form.project_id ? plans.value.filter((p) => p.project_id === form.project_id) : plans.value
+)
+
+const canSubmit = computed(() => !!form.plan_id && fileList.value.length > 0)
+
+const statusTag = (s) => ({ 通过: 'success', 失败: 'danger', 阻塞: 'warning' }[s] || 'info')
+
+async function loadBase() {
+  try {
+    const [ps, pls] = await Promise.all([projectApi.list(), planApi.list()])
+    projects.value = Array.isArray(ps) ? ps : ps.items || []
+    plans.value = Array.isArray(pls) ? pls : pls.items || []
+  } catch (e) {
+    console.error(e)
+  }
+}
+
+async function submit(dryRun) {
+  const fd = new FormData()
+  fileList.value.forEach((f) => {
+    if (f.raw) fd.append('files', f.raw)
+  })
+  fd.append('plan_id', String(form.plan_id))
+  fd.append('stage', form.stage)
+  fd.append('framework', form.framework || '')
+  fd.append('build_number', form.build_number || '')
+  fd.append('dry_run', dryRun ? 'true' : 'false')
+  importing.value = true
+  try {
+    report.value = await automationApi.importXml(fd)
+    if (dryRun) {
+      ElMessage.success(`解析完成: 匹配 ${report.value.matched}/${report.value.total}`)
+    } else {
+      ElMessage.success(`已导入 ${report.value.imported} 条执行结果`)
+    }
+  } catch (e) {
+    console.error(e)
+  } finally {
+    importing.value = false
+  }
+}
 
 const requestFields = computed(() => {
   if (!guide.value) return []
@@ -127,6 +270,7 @@ function copyCode(code) {
 
 onMounted(() => {
   loadGuide()
+  loadBase()
 })
 </script>
 
@@ -149,6 +293,48 @@ onMounted(() => {
 
 .guide-card {
   max-width: 1200px;
+}
+
+.import-card {
+  max-width: 1200px;
+  margin-bottom: 20px;
+}
+
+.header-tip {
+  margin-left: 12px;
+  color: #909399;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.import-form {
+  margin-bottom: 4px;
+}
+
+.xml-upload {
+  width: 100%;
+}
+
+.upload-tip {
+  color: #606266;
+  padding: 6px 0;
+}
+
+.import-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.report {
+  margin-top: 16px;
+}
+
+.report-summary {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
 }
 
 .card-header {

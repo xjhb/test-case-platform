@@ -182,6 +182,10 @@ export const versionApi = {
 export const automationApi = {
   batchSubmit: (data) => request.post('/automation/batch', data),
   guide: () => request.get('/automation/guide'),
+  importXml: (formData) => request.post('/automation/import-xml', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 60000,
+  }),
 }
 
 // ---- 需求管理 ----

@@ -150,6 +150,9 @@
 - **UAT**: 用户验收测试
 - **PRE**: 预发布测试
 
+> `DELETE /{id}` 会级联清除该计划的执行记录、逐步结果、轮次和报告,
+> 并把关联缺陷的 `plan_id` 置空;不会留下无法归属的孤儿数据。
+
 ---
 
 ## 6. 测试执行
@@ -539,6 +542,7 @@
 | 方法 | 路径 | 说明 | 权限 |
 |------|------|------|------|
 | POST | `/batch` | 批量提交自动化结果 | 已登录 |
+| POST | `/import-xml` | 导入 JUnit XML 执行结果 | 项目成员 |
 | GET | `/guide` | 集成指南 | 已登录 |
 
 > 回写前必须先把用例纳入计划范围(`测试计划 → 用例范围`),
@@ -565,6 +569,47 @@
   ]
 }
 ```
+
+---
+
+### POST /api/automation/import-xml
+
+`multipart/form-data` 导入 CI 产出的 JUnit XML(标准 `testsuites/testsuite/testcase` 结构)。
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `files` | file[] | 是 | JUnit XML,单次最多 20 个,单个不超过 10MB |
+| `plan_id` | int | 是 | 目标测试计划 |
+| `stage` | string | 否 | SIT/UAT/PRE,默认 SIT |
+| `framework` | string | 否 | 写入备注的框架名,缺省为 `JUnit` |
+| `build_number` | string | 否 | CI 构建号,写入备注 `[Build#128]` |
+| `dry_run` | bool | 否 | true 时只解析与匹配,不落库 |
+
+结果映射: `<failure>`/`<error>` → `失败`,`<skipped>` → `阻塞`,无子节点 → `通过`;
+`time` 属性四舍五入写入 `duration_seconds`,失败信息写入 `remark`。
+
+用例匹配规则(按顺序):
+1. `testcase/@name` 与项目内用例标题做去空格、忽略大小写的精确匹配;
+2. 名称中带平台编号时按 ID 匹配,支持 `TC-1024`、`case 1024`、`#1024` 等写法;
+3. 命中后仍要求用例在计划圈选范围内,否则计入 `unmatched` 并给出原因。
+
+**响应示例**:
+```json
+{
+  "plan_id": 21, "stage": "SIT", "dry_run": false,
+  "files": ["results.xml"], "total": 5, "matched": 3, "imported": 3,
+  "by_status": {"通过": 1, "失败": 1, "阻塞": 1},
+  "unmatched": [
+    {"name": "XML导入探针不存在的用例", "classname": "com.demo.PayTest", "file": "results.xml", "status": "失败", "reason": "按用例标题和编号均未匹配到平台用例"},
+    {"name": "用例#33", "file": "results.xml", "status": "通过", "testcase_id": 33, "reason": "用例#33 不属于计划#21的用例范围"}
+  ],
+  "unmatched_total": 2, "file_errors": [], "suites": [{"name": "登录模块", "tests": 3}]
+}
+```
+
+> 每次导入都新增执行记录(与 `/batch` 一致,保留 Rerun 历史);
+> 用例的 `status` 字段同步为该次导入的结果,与手工执行口径保持一致。
+> 前端「自动化集成」页提供上传入口,可先「解析预览」确认匹配率再正式导入。
 
 ---
 

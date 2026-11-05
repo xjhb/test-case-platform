@@ -1,13 +1,25 @@
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import delete as sa_delete, select, update as sa_update
 from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..deps import accessible_project_ids, get_current_user, require_project_access
 from ..logger import log_op
-from ..models import PlanTestCase, Project, SystemConfig, TestCase, TestPlan, TestRun, User
+from ..models import (
+    Defect,
+    PlanTestCase,
+    Project,
+    StepResult,
+    SystemConfig,
+    TestCase,
+    TestPlan,
+    TestReport,
+    TestRound,
+    TestRun,
+    User,
+)
 from ..schemas import PlanCasesPayload, StageAdvance, StageTimeUpdate, TestPlanCreate, TestPlanOut
 from ..scope import has_scope, plan_case_ids
 
@@ -299,6 +311,15 @@ def delete_plan(plan_id: int, db: Session = Depends(get_db), current: User = Dep
         raise HTTPException(status_code=404, detail="计划不存在")
     require_project_access(plan.project_id, db, current)
     ver = plan.version
+    # 执行记录、轮次、报告与用例范围快照随计划一起删除;DB 层 FK 未必建出 CASCADE,显式清理避免孤儿记录
+    run_ids = [rid for (rid,) in db.execute(select(TestRun.id).where(TestRun.plan_id == plan_id))]
+    if run_ids:
+        db.execute(sa_delete(StepResult).where(StepResult.run_id.in_(run_ids)))
+        db.execute(sa_delete(TestRun).where(TestRun.id.in_(run_ids)))
+    db.execute(sa_delete(TestRound).where(TestRound.plan_id == plan_id))
+    db.execute(sa_delete(TestReport).where(TestReport.plan_id == plan_id))
+    db.execute(sa_delete(PlanTestCase).where(PlanTestCase.plan_id == plan_id))
+    db.execute(sa_update(Defect).where(Defect.plan_id == plan_id).values(plan_id=None))
     db.delete(plan)
     db.commit()
     log_op(db, current, "删除", target=f"计划#{plan_id} {ver}")

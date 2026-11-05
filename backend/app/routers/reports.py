@@ -365,9 +365,9 @@ def list_reports(
     if plan_id is not None:
         q = q.where(TestReport.plan_id == plan_id)
     if project_id is not None:
-        plan_ids = [p.id for p in db.execute(
+        plan_ids = list(db.execute(
             select(TestPlan.id).where(TestPlan.project_id == project_id)
-        ).scalars()]
+        ).scalars())
         if plan_ids:
             q = q.where(TestReport.plan_id.in_(plan_ids))
         else:
