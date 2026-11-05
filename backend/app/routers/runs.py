@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..deps import get_current_user, require_project_access
 from ..logger import log_op
-from ..models import StepResult, TestCase, TestCaseStep, TestPlan, TestRun, User
+from ..models import StepResult, TestEnvironment, TestCase, TestCaseStep, TestPlan, TestRun, User
 from ..schemas import StepResultIn, TestRunCreate, TestRunOut
 from ..scope import in_scope
 
@@ -14,6 +14,20 @@ router = APIRouter(prefix="/api/runs", tags=["测试执行"], dependencies=[Depe
 VALID_STATUS = {"通过", "失败", "阻塞"}
 VALID_STEP_STATUS = {"通过", "失败", "阻塞", "未执行"}
 VALID_STAGES = ["SIT", "UAT", "PRE"]
+
+
+def resolve_env(db: Session, plan: TestPlan, env_id: int | None) -> TestEnvironment | None:
+    """执行环境必须属于计划所属项目,且未停用"""
+    if not env_id:
+        return None
+    env = db.get(TestEnvironment, env_id)
+    if not env:
+        raise HTTPException(status_code=400, detail="执行环境不存在")
+    if env.project_id != plan.project_id:
+        raise HTTPException(status_code=400, detail=f"环境「{env.name}」不属于该计划所在项目")
+    if env.status == "已停用":
+        raise HTTPException(status_code=400, detail=f"环境「{env.name}」已停用,不能在其上执行")
+    return env
 
 
 def _derive_status(step_statuses: list[str]) -> str:
@@ -73,6 +87,7 @@ def create_run(payload: TestRunCreate, db: Session = Depends(get_db), current: U
     if stage not in VALID_STAGES:
         raise HTTPException(status_code=400, detail=f"阶段只能是 {'/'.join(VALID_STAGES)}")
 
+    env = resolve_env(db, plan, payload.env_id)
     run = TestRun(
         testcase_id=payload.testcase_id,
         plan_id=payload.plan_id,
@@ -81,6 +96,7 @@ def create_run(payload: TestRunCreate, db: Session = Depends(get_db), current: U
         remark=payload.remark or "",
         screenshot=payload.screenshot or "",
         executed_by=current.id,
+        env_id=env.id if env else None,
     )
     db.add(run)
     db.flush()
@@ -101,9 +117,12 @@ def create_run(payload: TestRunCreate, db: Session = Depends(get_db), current: U
     db.commit()
     db.refresh(run)
     log_op(db, current, "执行", target=f"用例#{tc.id} {tc.title}",
-           detail=f"计划#{plan.id} 阶段{stage} 结果:{derived_status}"
+           detail=f"计划#{plan.id} 阶段{stage}" + (f" 环境:{env.name}" if env else "") +
+                  f" 结果:{derived_status}"
                   + (f" (步骤{len(payload.step_results)}条)" if payload.step_results else ""))
-    return run
+    out = TestRunOut.model_validate(run)
+    out.env_name = env.name if env else ""
+    return out
 
 
 @router.get("/{run_id}/step-results")
@@ -136,15 +155,25 @@ def list_step_results(run_id: int, db: Session = Depends(get_db), current: User 
 
 
 @router.get("", response_model=list[TestRunOut])
-def list_runs(testcase_id: int, plan_id: int, db: Session = Depends(get_db), current: User = Depends(get_current_user)):
+def list_runs(testcase_id: int, plan_id: int, env_id: int | None = None,
+              db: Session = Depends(get_db), current: User = Depends(get_current_user)):
     plan = db.get(TestPlan, plan_id)
     if not plan:
         raise HTTPException(status_code=404, detail="计划不存在")
     require_project_access(plan.project_id, db, current)
-    return list(
-        db.execute(
-            select(TestRun)
-            .where(TestRun.testcase_id == testcase_id, TestRun.plan_id == plan_id)
-            .order_by(TestRun.id.desc())
-        ).scalars()
-    )
+    q = select(TestRun).where(TestRun.testcase_id == testcase_id, TestRun.plan_id == plan_id)
+    if env_id:
+        q = q.where(TestRun.env_id == env_id)
+    rows = list(db.execute(q.order_by(TestRun.id.desc())).scalars())
+    env_map = {
+        e.id: e.name
+        for e in db.execute(select(TestEnvironment).where(
+            TestEnvironment.id.in_([r.env_id for r in rows if r.env_id] or [0])
+        )).scalars()
+    }
+    out = []
+    for r in rows:
+        item = TestRunOut.model_validate(r)
+        item.env_name = env_map.get(r.env_id, "") if r.env_id else ""
+        out.append(item)
+    return out

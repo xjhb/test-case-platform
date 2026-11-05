@@ -110,6 +110,7 @@ class TestRun(Base):
     executed_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     round_id: Mapped[int | None] = mapped_column(ForeignKey("test_rounds.id", ondelete="SET NULL"), nullable=True, index=True)  # 所属轮次
     duration_seconds: Mapped[int | None] = mapped_column(nullable=True)  # 执行耗时(秒),自动化回传
+    env_id: Mapped[int | None] = mapped_column(ForeignKey("test_environments.id", ondelete="SET NULL"), nullable=True, index=True)  # 执行环境
 
 
 # ===================== 计划-用例 圈选范围(快照) =====================
@@ -121,6 +122,24 @@ class PlanTestCase(Base):
     testcase_id: Mapped[int] = mapped_column(ForeignKey("testcases.id", ondelete="CASCADE"), primary_key=True, index=True)
     added_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     added_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+# ===================== 测试环境台账 =====================
+class TestEnvironment(Base):
+    """项目下的测试环境。执行记录归属到具体环境,便于区分机器、版本与问题定位。"""
+    __tablename__ = "test_environments"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(128))
+    stage: Mapped[str] = mapped_column(String(8), default="SIT")  # 主要服务的阶段 SIT/UAT/PRE
+    status: Mapped[str] = mapped_column(String(16), default="可用")  # 可用/占用中/维护中/已停用
+    url: Mapped[str] = mapped_column(String(500), default="")  # 访问地址
+    version: Mapped[str] = mapped_column(String(64), default="")  # 部署版本
+    owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    remark: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
 # ===================== 阶段准入/准出门禁 =====================

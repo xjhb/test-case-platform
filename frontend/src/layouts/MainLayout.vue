@@ -135,6 +135,10 @@ onBeforeUnmount(() => {
             <el-icon><Tickets /></el-icon>
             <span>项目批次</span>
           </el-menu-item>
+          <el-menu-item index="/environments">
+            <el-icon><Monitor /></el-icon>
+            <span>测试环境</span>
+          </el-menu-item>
           <el-menu-item index="/gates">
             <el-icon><Lock /></el-icon>
             <span>阶段门禁</span>

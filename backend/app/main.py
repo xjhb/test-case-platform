@@ -18,7 +18,7 @@ from . import models  # noqa: F401  确保模型注册
 from .config import settings
 from .database import Base, engine
 from .notify import start_stage_scheduler
-from .routers import auth, automation, defects, gates, imports, integrations, logs, notifications, p2_features, plans, projects, requirements, reports, runs, stats, system, teams, testcases, todo, uploads, users, versions
+from .routers import auth, automation, defects, environments, gates, imports, integrations, logs, notifications, p2_features, plans, projects, requirements, reports, runs, stats, system, teams, testcases, todo, uploads, users, versions
 from .seed import seed_admin
 
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
@@ -135,6 +135,9 @@ def migrate():
         # testruns 补自动化执行耗时
         if not conn.execute(text("SHOW COLUMNS FROM testruns LIKE 'duration_seconds'")).fetchone():
             conn.execute(text("ALTER TABLE testruns ADD COLUMN duration_seconds INT NULL"))
+        # testruns 补执行环境
+        if not conn.execute(text("SHOW COLUMNS FROM testruns LIKE 'env_id'")).fetchone():
+            conn.execute(text("ALTER TABLE testruns ADD COLUMN env_id INT NULL"))
         # defects 补 run_id
         if not conn.execute(text("SHOW COLUMNS FROM defects LIKE 'run_id'")).fetchone():
             conn.execute(text("ALTER TABLE defects ADD COLUMN run_id INT NULL"))
@@ -240,6 +243,7 @@ def migrate():
             ("defects", "run_id", "testruns", "SET NULL"),
             ("testcases", "reviewer_id", "users", "SET NULL"),
             ("testcases", "folder_id", "testcase_folders", "SET NULL"),
+            ("testruns", "env_id", "test_environments", "SET NULL"),
         ]
         for tbl, col, ref, rule in fk_repairs:
             try:
@@ -262,7 +266,7 @@ def migrate():
                 conn.execute(
                     text(
                         f"ALTER TABLE {tbl} ADD CONSTRAINT fk_{tbl}_{col} "
-                        f"FOREIGN KEY ({col}) REFERENCES {ref}(id) ON DELETE SET NULL"
+                        f"FOREIGN KEY ({col}) REFERENCES {ref}(id) ON DELETE {rule}"
                     )
                 )
             except Exception as e:  # 约束补建失败不应阻塞启动
@@ -319,6 +323,7 @@ app.include_router(system.router)
 app.include_router(integrations.router)
 app.include_router(todo.router)
 app.include_router(gates.router)
+app.include_router(environments.router)
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")

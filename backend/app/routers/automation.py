@@ -12,6 +12,7 @@ from ..junit import JUnitParseError, parse_junit
 from ..logger import log_op
 from ..models import TestCase, TestPlan, TestRun, User
 from ..scope import in_scope
+from .runs import resolve_env
 
 router = APIRouter(prefix="/api/automation", tags=["自动化集成"], dependencies=[Depends(get_current_user)])
 
@@ -32,6 +33,7 @@ class AutomationResultItem(BaseModel):
 class AutomationBatchSubmit(BaseModel):
     plan_id: int
     stage: str = "SIT"  # SIT/UAT/PRE
+    env_id: int | None = None  # 执行环境,须属于该计划所属项目
     results: list[AutomationResultItem] = Field(min_length=1)
     framework: str = ""  # 自动化框架名称,如 Selenium/Playwright/Cypress
     build_number: str = ""  # 构建号
@@ -59,6 +61,7 @@ def batch_submit_results(
     plan = db.get(TestPlan, payload.plan_id)
     if not plan:
         raise HTTPException(status_code=404, detail="测试计划不存在")
+    env = resolve_env(db, plan, payload.env_id)
 
     valid_statuses = {"通过", "失败", "阻塞"}
     success_count = 0
@@ -111,6 +114,7 @@ def batch_submit_results(
                 executed_by=current.id,
                 executed_at=executed_at,
                 duration_seconds=item.duration_seconds,
+                env_id=env.id if env else None,
             )
             db.add(run)
             success_count += 1
@@ -156,6 +160,7 @@ async def import_junit_xml(
     stage: str = Form("SIT"),
     framework: str = Form("", description="自动化框架,如 Selenium/Playwright"),
     build_number: str = Form("", description="CI 构建号"),
+    env_id: int | None = Form(None, description="执行环境ID,须属于该计划所属项目"),
     dry_run: bool = Form(False, description="只解析和匹配,不落库"),
     db: Session = Depends(get_db),
     current: User = Depends(get_current_user),
@@ -167,6 +172,7 @@ async def import_junit_xml(
     require_project_access(plan.project_id, db, current)
     if stage not in {"SIT", "UAT", "PRE"}:
         raise HTTPException(status_code=400, detail="阶段只能是 SIT/UAT/PRE")
+    env = resolve_env(db, plan, env_id)
     if len(files) > MAX_XML_FILES:
         raise HTTPException(status_code=400, detail=f"单次最多上传 {MAX_XML_FILES} 个 XML 文件")
 
@@ -257,6 +263,7 @@ async def import_junit_xml(
             remark=" ".join(parts)[:2000],
             executed_by=current.id,
             duration_seconds=case.duration_seconds or None,
+            env_id=env.id if env else None,
         ))
         last_status[tc_id] = case.status
         imported += 1

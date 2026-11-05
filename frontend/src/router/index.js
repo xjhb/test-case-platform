@@ -34,6 +34,12 @@ const routes = [
         meta: { title: '项目批次' },
       },
       {
+        path: 'environments',
+        name: 'environments',
+        component: () => import('../views/Environments.vue'),
+        meta: { title: '测试环境' },
+      },
+      {
         path: 'gates',
         name: 'gates',
         component: () => import('../views/GateSettings.vue'),

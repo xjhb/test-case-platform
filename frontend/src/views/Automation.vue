@@ -15,7 +15,7 @@
 
       <el-form :inline="true" class="import-form">
         <el-form-item label="项目">
-          <el-select v-model="form.project_id" placeholder="选择项目" style="width: 180px" @change="form.plan_id = null">
+          <el-select v-model="form.project_id" placeholder="选择项目" style="width: 180px" @change="onProjectChange">
             <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" />
           </el-select>
         </el-form-item>
@@ -32,6 +32,17 @@
         <el-form-item label="阶段">
           <el-select v-model="form.stage" style="width: 100px">
             <el-option v-for="s in ['SIT', 'UAT', 'PRE']" :key="s" :label="s" :value="s" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="执行环境">
+          <el-select v-model="form.env_id" clearable placeholder="不指定" style="width: 170px">
+            <el-option
+              v-for="e in envOptions"
+              :key="e.id"
+              :label="`${e.name}(${e.stage})`"
+              :value="e.id"
+              :disabled="e.status === '已停用'"
+            />
           </el-select>
         </el-form-item>
         <el-form-item label="框架">
@@ -167,7 +178,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { automationApi, planApi, projectApi } from '../api'
+import { automationApi, planApi, projectApi, envApi } from '../api'
 
 const loading = ref(false)
 const guide = ref(null)
@@ -183,10 +194,23 @@ const form = reactive({
   project_id: null,
   plan_id: null,
   stage: 'SIT',
+  env_id: null,
   framework: '',
   build_number: '',
   dry_run: false,
 })
+
+const envOptions = ref([])
+
+async function onProjectChange() {
+  form.plan_id = null
+  form.env_id = null
+  if (!form.project_id) {
+    envOptions.value = []
+    return
+  }
+  envOptions.value = await envApi.list({ project_id: form.project_id }).catch(() => [])
+}
 
 const planOptions = computed(() =>
   form.project_id ? plans.value.filter((p) => p.project_id === form.project_id) : plans.value
@@ -213,6 +237,7 @@ async function submit(dryRun) {
   })
   fd.append('plan_id', String(form.plan_id))
   fd.append('stage', form.stage)
+  if (form.env_id) fd.append('env_id', String(form.env_id))
   fd.append('framework', form.framework || '')
   fd.append('build_number', form.build_number || '')
   fd.append('dry_run', dryRun ? 'true' : 'false')
@@ -237,6 +262,7 @@ const requestFields = computed(() => {
   return [
     { field: 'plan_id', type: 'integer', required: true, description: '测试计划ID' },
     { field: 'stage', type: 'string', required: false, description: '执行阶段: SIT/UAT/PRE (默认SIT)' },
+    { field: 'env_id', type: 'integer', required: false, description: '执行环境ID,须属于该计划所属项目' },
     { field: 'framework', type: 'string', required: false, description: '自动化框架名称' },
     { field: 'build_number', type: 'string', required: false, description: '构建号' },
     { field: 'results', type: 'array', required: true, description: '测试结果列表' },

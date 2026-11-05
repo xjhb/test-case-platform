@@ -20,6 +20,7 @@ from ..schemas import (
     TestRoundCreate, TestRoundOut,
 )
 from ..scope import plan_case_ids
+from .runs import resolve_env
 
 router = APIRouter(prefix="/api/p2", tags=["P2功能"], dependencies=[Depends(get_current_user)])
 
@@ -530,6 +531,7 @@ def batch_execute(
                 status_code=400, detail=f"用例不存在或不在计划#{plan.id}的用例范围内: {', '.join(map(str, bad))}"
             )
 
+    env = resolve_env(db, plan, payload.env_id)
     success_count = 0
     fail_count = 0
     for item in payload.items:
@@ -540,6 +542,7 @@ def batch_execute(
                 testcase_id=item.testcase_id, plan_id=payload.plan_id,
                 round_id=payload.round_id, stage=stage, status=item.status,
                 remark=item.remark, screenshot=item.screenshot, executed_by=current.id,
+                env_id=env.id if env else None,
             )
             db.add(run)
             # 更新用例状态
@@ -550,5 +553,6 @@ def batch_execute(
         except Exception:
             fail_count += 1
     db.commit()
-    log_op(db, current, "执行", target=f"计划#{payload.plan_id}", detail=f"批量执行{success_count}条用例")
+    log_op(db, current, "执行", target=f"计划#{payload.plan_id}",
+           detail=f"批量执行{success_count}条用例" + (f" 环境:{env.name}" if env else ""))
     return BatchExecuteResult(total=len(payload.items), success=success_count, failed=fail_count)

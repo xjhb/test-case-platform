@@ -156,6 +156,15 @@ export const gateApi = {
   check: (planId, stage, kind) => request.get('/gates/check', { params: { plan_id: planId, stage, kind } }),
 }
 
+// ---- 测试环境 ----
+export const envApi = {
+  list: (params) => request.get('/environments', { params }),
+  create: (data) => request.post('/environments', data),
+  update: (id, data) => request.put(`/environments/${id}`, data),
+  remove: (id) => request.delete(`/environments/${id}`),
+  runs: (id, params) => request.get(`/environments/${id}/runs`, { params }),
+}
+
 // ---- 缺陷管理 ----
 export const defectApi = {
   list: (params) => request.get('/defects', { params }),
@@ -223,8 +232,8 @@ export const requirementApi = {
 // ---- 测试执行 ----
 export const runApi = {
   create: (data) => request.post('/runs', data),
-  list: (testcaseId, planId) =>
-    request.get('/runs', { params: { testcase_id: testcaseId, plan_id: planId } }),
+  list: (testcaseId, planId, envId) =>
+    request.get('/runs', { params: { testcase_id: testcaseId, plan_id: planId, env_id: envId || undefined } }),
   stepResults: (runId) => request.get(`/runs/${runId}/step-results`),
 }
 

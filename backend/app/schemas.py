@@ -270,6 +270,7 @@ class TestRunCreate(BaseModel):
     remark: str = ""
     screenshot: str = ""  # 通过时必填,成功截图URL
     stage: str | None = None  # 执行阶段 SIT/UAT/PRE;不传则用计划当前阶段
+    env_id: int | None = None  # 执行环境;必须属于该计划所属项目
     step_results: list[StepResultIn] = Field(default_factory=list)  # 逐步骤结果;非空时用例状态由步骤推导
 
 
@@ -279,6 +280,8 @@ class TestRunOut(BaseModel):
     testcase_id: int
     plan_id: int | None = None
     round_id: int | None = None
+    env_id: int | None = None
+    env_name: str = ""
     stage: str
     status: str
     remark: str
@@ -604,6 +607,7 @@ class BatchExecuteRequest(BaseModel):
     plan_id: int
     round_id: int | None = None
     stage: str | None = None
+    env_id: int | None = None  # 本批执行统一归属的环境
     items: list[BatchExecuteItem]
 
 
@@ -684,7 +688,6 @@ class StageGateUpdate(BaseModel):
     threshold: int | None = None
     enabled: bool | None = None
 
-
 class StageGateOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
@@ -698,4 +701,44 @@ class StageGateOut(BaseModel):
     hint: str = ""
     threshold: int
     enabled: bool
+    updated_at: datetime
+
+
+# ---------- 测试环境 ----------
+class EnvCreate(BaseModel):
+    project_id: int
+    name: str
+    stage: str = "SIT"
+    status: str = "可用"
+    url: str = ""
+    version: str = ""
+    owner_id: int | None = None
+    remark: str = ""
+
+
+class EnvUpdate(BaseModel):
+    name: str | None = None
+    stage: str | None = None
+    status: str | None = None
+    url: str | None = None
+    version: str | None = None
+    owner_id: int | None = None
+    remark: str | None = None
+
+
+class EnvOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    project_id: int
+    name: str
+    stage: str
+    status: str
+    url: str
+    version: str
+    owner_id: int | None = None
+    owner_name: str = ""
+    remark: str
+    run_count: int = 0
+    failed_count: int = 0
+    created_at: datetime
     updated_at: datetime

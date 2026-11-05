@@ -2,7 +2,7 @@
 import { ref, reactive, onMounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { planApi, projectApi, reportApi, p2Api, testcaseApi, gateApi } from '../api'
+import { planApi, projectApi, reportApi, p2Api, testcaseApi, gateApi, envApi } from '../api'
 import { useAuthStore } from '../stores/auth'
 
 const route = useRoute()
@@ -313,13 +313,18 @@ const batchLoading = ref(false)
 const batchSubmitting = ref(false)
 const batchTestcases = ref([])
 const batchTestcasesLoading = ref(false)
+const batchEnv = ref(null)
+const envOptions = ref([])
 
 async function openBatchDialog(row) {
   batchPlan.value = row
   batchRound.value = null
   batchStage.value = row.current_stage || 'SIT'
   batchItems.value = []
+  batchEnv.value = null
   batchVisible.value = true
+  envOptions.value = await envApi.list({ project_id: row.project_id }).catch(() => [])
+  batchEnv.value = envOptions.value.find((e) => e.stage === batchStage.value && e.status === '可用')?.id || null
   await loadRoundsForBatch()
   await loadTestcasesForBatch()
 }
@@ -376,6 +381,7 @@ async function submitBatch() {
       plan_id: batchPlan.value.id,
       round_id: batchRound.value,
       stage: batchStage.value,
+      env_id: batchEnv.value || null,
       items: batchItems.value,
     })
     ElMessage.success(`批量执行完成:成功 ${res.success} 条,失败 ${res.failed} 条`)
@@ -785,6 +791,17 @@ async function clearScope() {
         <el-form-item label="阶段">
           <el-select v-model="batchStage" style="width: 120px">
             <el-option v-for="s in STAGES" :key="s" :label="stageLabel(s)" :value="s" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="执行环境">
+          <el-select v-model="batchEnv" clearable placeholder="不指定环境" style="width: 200px">
+            <el-option
+              v-for="e in envOptions"
+              :key="e.id"
+              :label="`${e.name}(${e.stage})`"
+              :value="e.id"
+              :disabled="e.status === '已停用'"
+            />
           </el-select>
         </el-form-item>
       </el-form>

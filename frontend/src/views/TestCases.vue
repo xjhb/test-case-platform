@@ -2,7 +2,7 @@
 import { ref, reactive, onMounted, onBeforeUnmount, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { projectApi, testcaseApi, runApi, uploadApi, planApi, importApi, testcaseExportUrl, p2Api, userApi } from '../api'
+import { projectApi, testcaseApi, runApi, uploadApi, planApi, importApi, testcaseExportUrl, p2Api, userApi, envApi } from '../api'
 import { useAuthStore } from '../stores/auth'
 
 const route = useRoute()
@@ -151,7 +151,23 @@ function onProjectChange() {
   loadFolders()
   loadTags()
   loadCustomFields()
+  loadEnvs()
 }
+
+// 执行环境:按项目取,供执行对话框下拉与历史列展示
+const envs = ref([])
+async function loadEnvs() {
+  if (!query.project_id) {
+    envs.value = []
+    return
+  }
+  try {
+    envs.value = await envApi.list({ project_id: query.project_id })
+  } catch (e) {
+    envs.value = []
+  }
+}
+const activeEnvs = computed(() => envs.value.filter((e) => e.status !== '已停用'))
 
 function onPlanChange() {
   // 切换计划不改变已选阶段
@@ -489,7 +505,7 @@ async function handleImportUpload(opt) {
 // ---- 执行 ----
 const execVisible = ref(false)
 const execFormRef = ref()
-const execForm = reactive({ testcase_id: null, status: '通过', remark: '', screenshot: '' })
+const execForm = reactive({ testcase_id: null, status: '通过', remark: '', screenshot: '', env_id: null })
 const execSteps = ref([])
 const execRules = {
   status: [{ required: true, message: '请选择执行结果', trigger: 'change' }],
@@ -507,6 +523,8 @@ function openExec(row) {
   execForm.status = '通过'
   execForm.remark = ''
   execForm.screenshot = ''
+  // 默认选中与当前阶段匹配的可用环境,减少一次点击;用户仍可改
+  execForm.env_id = activeEnvs.value.find((e) => e.stage === activeStage.value)?.id || null
   execFileList.value = []
   execSteps.value = []
   execVisible.value = true
@@ -572,6 +590,7 @@ async function submitExec() {
     screenshot: execForm.screenshot,
     // 显式指定执行阶段,不再由后端取计划当前阶段
     stage: activeStage.value,
+    env_id: execForm.env_id || null,
   }
   if (useSteps) {
     body.step_results = execSteps.value.map((s) => ({ step_id: s.id, status: s.status, actual: s.actual }))
@@ -865,6 +884,7 @@ onMounted(async () => {
   loadFolders()
   loadTags()
   loadCustomFields()
+  loadEnvs()
   // 通知里的"查看详情"带 focus=<用例ID>,直接打开追溯视图
   if (route.query.focus) {
     const tcId = Number(route.query.focus)
@@ -1241,6 +1261,20 @@ onBeforeUnmount(() => {
             <el-option v-for="s in STAGE_OPTIONS" :key="s.value" :label="s.label" :value="s.value" />
           </el-select>
         </el-form-item>
+        <el-form-item label="执行环境">
+          <el-select v-model="execForm.env_id" clearable placeholder="不指定环境" style="width: 240px">
+            <el-option
+              v-for="e in activeEnvs"
+              :key="e.id"
+              :label="`${e.name}(${e.stage})`"
+              :value="e.id"
+              :disabled="e.status === '已停用'"
+            />
+          </el-select>
+          <span v-if="!envs.length" style="margin-left: 10px; color: #909399; font-size: 12px">
+            该项目未登记环境,可在 测试环境 页面新增
+          </span>
+        </el-form-item>
         <el-form-item v-if="execHasSteps" label="步骤结果">
           <div style="width: 100%">
             <el-table :data="execSteps" border size="small" max-height="260">
@@ -1349,6 +1383,9 @@ onBeforeUnmount(() => {
           <template #default="{ row }">
             <el-tag :type="stageTagType(row.stage)" size="small">{{ stageLabel(row.stage) }}</el-tag>
           </template>
+        </el-table-column>
+        <el-table-column label="环境" width="130" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.env_name || '-' }}</template>
         </el-table-column>
         <el-table-column label="结果" width="90">
           <template #default="{ row }">
