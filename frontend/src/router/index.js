@@ -76,6 +76,12 @@ const routes = [
         meta: { title: '测试需求' },
       },
       {
+        path: 'lineage',
+        name: 'lineage',
+        component: () => import('../views/Lineage.vue'),
+        meta: { title: '数据血缘' },
+      },
+      {
         path: 'users',
         name: 'users',
         component: () => import('../views/Users.vue'),

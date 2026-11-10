@@ -357,6 +357,14 @@ export const integrationApi = {
   triggerPipeline: (data) => request.post('/integrations/cicd/trigger', data),
 }
 
+// ---- 数据血缘与影响分析 ----
+export const lineageApi = {
+  graph: (params) => request.get('/lineage/graph', { params }),
+  roots: (params) => request.get('/lineage/roots', { params }),
+  impact: (params) => request.get('/lineage/impact', { params }),
+  overview: (projectId) => request.get('/lineage/overview', { params: { project_id: projectId } }),
+}
+
 // ---- 测试用例导出(浏览器直接下载,需手动带 token) ----
 export const testcaseExportUrl = (projectId) => `/api/testcases/export?project_id=${projectId}`
 

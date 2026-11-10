@@ -954,6 +954,155 @@ POST /api/dict
 
 ---
 
+## 26. 数据血缘与影响分析
+
+**前缀**: `/api/lineage`
+
+| 方法 | 路径 | 说明 | 权限 |
+|------|------|------|------|
+| GET | `/graph` | 血缘关系图(六类节点,逐层展开) | 项目成员 |
+| GET | `/roots` | 图起点候选列表(按类型+关键字) | 项目成员 |
+| GET | `/impact` | 影响分析(修改/删除某对象会牵连什么) | 项目成员 |
+| GET | `/overview` | 项目血缘体检(覆盖率与断链清单) | 项目成员 |
+
+四个接口都是只读的:不写业务数据,也不写操作日志,因此不会推进审计哈希链。
+血缘关系全部直读业务表(`requirement_testcases` / `plan_testcases` / `testruns` / `defects`),
+不另建血缘表,所以不会出现血缘与业务数据对不上的情况。
+
+### 血缘图
+
+```
+GET /api/lineage/graph?project_id=1&root_type=testcase&root_id=15&depth=2&max_nodes=300
+```
+
+| 参数 | 说明 |
+|------|------|
+| `project_id` | 必填 |
+| `root_type` | `requirement/testcase/plan/run/defect/environment`;与 `root_id` 必须同时给,否则 400 |
+| `root_id` | 起点对象 ID |
+| `depth` | 展开层数 0-5,默认 2 |
+| `max_nodes` | 节点上限 10-2000,默认 300 |
+
+不给 `root_type/root_id` 时返回**项目全景图**:项目内所有对象都作为起点,
+否则孤儿用例、无批次的执行记录、无来源的缺陷会悄悄从图上消失。
+起点顺序即截断优先级(需求 → 批次 → 用例 → 执行记录 → 缺陷 → 环境),
+超出 `max_nodes` 时截断并置 `truncated=true`,被截断节点不会留下悬空边。
+
+```json
+{
+  "project_id": 1, "root": "tc:15", "depth": 2, "max_nodes": 300, "truncated": false,
+  "categories": [{"name": "需求"}, {"name": "用例"}, {"name": "批次"},
+                 {"name": "执行记录"}, {"name": "缺陷"}, {"name": "环境"}],
+  "counts": {"requirement": 2, "testcase": 3, "plan": 2, "run": 4, "defect": 3, "environment": 1},
+  "nodes": [{"id": "tc:15", "type": "testcase", "type_label": "用例", "category": 1,
+             "name": "开户成功流程",
+             "info": {"模块": "客户", "优先级": "P0", "结果": "失败", "评审": "已批准"}}],
+  "links": [{"source": "req:7", "target": "tc:15", "type": "覆盖"}]
+}
+```
+
+- 节点 `id` 为 `类型前缀:ID`,前缀分别是 `req/tc/plan/run/def/env`;`links` 用这个 `id` 引用节点
+- 边方向统一为业务流向:需求 —覆盖→ 用例 —执行→ 执行记录 —产生→ 缺陷;
+  批次 —圈选→ 用例,执行记录 —归属→ 批次,执行记录 —运行于→ 环境,用例/批次 —关联→ 缺陷
+- 返回的是**节点集上的诱导子图**:同一批节点之间已存在的其它关系也会一并画出
+  (例如 `depth=1` 从用例出发时,执行记录与批次之间的「归属」边也会出现)
+- 跨项目对象一律丢弃:用别的项目的用例 ID 当根节点,返回空节点集而不是 403,避免探测他项目数据
+
+图上只画**已落库的显式关联**。未圈选范围的批次按项目全部用例隐式覆盖(见「计划用例范围」口径),
+这种隐式关系不进图(否则每个批次会连到项目里所有用例,图直接糊成一团),只在影响分析里提示。
+
+### 起点候选
+
+```
+GET /api/lineage/roots?project_id=1&type=testcase&keyword=开户&limit=200
+```
+
+`type` 为六类之一,非法值 400。`keyword` 对需求(标题/编号)、用例(标题/模块)、缺陷(标题)生效,
+批次、执行记录、环境不过关键字。返回 `{"type_label": "用例", "items": [{"id": 15, "name": "...", "note": "P0 / 失败"}]}`。
+
+### 影响分析
+
+```
+GET /api/lineage/impact?project_id=1&type=testcase&id=15&change=modify
+```
+
+`type` 只能是 `requirement/testcase/plan/environment/defect`(执行记录本身不可改删,传 `run` 返回 400);
+`change` 为 `modify`(默认)/`delete`,两者的处置建议不同。对象不存在或不属于该项目一律 404。
+
+```json
+{
+  "root": {"id": "tc:15", "type": "testcase", "name": "开户成功流程", "info": {}},
+  "change": "modify", "change_label": "修改", "project_id": 1,
+  "critical_severities": ["致命", "严重"],
+  "risk": {"level": "medium", "label": "中", "reason": "1 个进行中批次、0 个未关闭缺陷会受影响"},
+  "summary": [{"label": "关联需求", "value": 2}, {"label": "受影响批次", "value": 2}],
+  "sections": [{
+    "key": "plans", "title": "受影响批次", "level": "danger",
+    "note": "以下批次的统计分母与通过率都包含该用例",
+    "count": 2, "shown": 2,
+    "items": [{"id": 18, "name": "批次 v1.0", "note": "SIT / 进行中(未圈选范围,隐式覆盖)",
+               "link": "/plans?project_id=1&focus=18"}],
+    "action": "进行中的批次需要重新执行该用例,已完成批次的历史结论应保留原样"
+  }],
+  "suggestion": ["修改后请在进行中的批次里重新执行该用例,旧结果不代表新版本"]
+}
+```
+
+- `level` 取 `danger/warning/info`,`risk.level` 取 `high/medium/low`(`label` 为高/中/低)
+- 每个分组最多列 50 条(`shown`),`count` 始终是真实总数
+- `items[].link` 为前端路由:用例/批次/缺陷带 `project_id` 与 `focus` 参数可直接定位到行,
+  需求与环境只给菜单路径(这两个视图不支持 focus),执行记录没有独立视图故为空串
+- 「计入紧急」的严重程度集合 `critical_severities` 由数据字典决定(见 §24),未配置时回退 `致命/严重`
+
+各类型根对象的分组:
+
+| type | 分组 `key` |
+|------|-----------|
+| `testcase` | `requirements` / `plans` / `runs` / `defects` / `environments` |
+| `requirement` | `testcases` / `plans` / `runs` / `defects` |
+| `plan` | `testcases` / `runs` / `defects` / `rounds` / `environments` |
+| `environment` | `runs` / `testcases` / `plans` / `defects` |
+| `defect` | `testcase` / `run` / `plan` / `requirements` |
+
+口径要点:
+
+- 用例的「受影响批次」= 显式圈选该用例的批次 + **未圈选范围**的批次(后者按项目全部用例隐式覆盖),
+  隐式覆盖的批次在 `note` 里标注
+- 用例的「关联缺陷」= 直接挂在用例上的 + 由该用例执行记录产生的,按缺陷 ID 去重
+- 批次影响分析会附带当前阶段准出门禁结论(`summary` 里的 `<阶段> 准出门禁`,取值 达标/未达标/未配置)
+- 未关闭缺陷的判定与门禁一致:`status != 关闭`
+- 缺陷只挂了执行记录时,来源用例与所属批次从执行记录回溯,避免影响分析与来源弹窗显示为空
+
+### 血缘体检
+
+```
+GET /api/lineage/overview?project_id=1
+```
+
+```json
+{
+  "project_id": 1,
+  "counts": {"requirement": 2, "testcase": 3, "plan": 2, "run": 4, "defect": 4, "environment": 2},
+  "coverage": {"covered_requirements": 2, "requirement_coverage": 100.0,
+               "linked_testcases": 2, "testcase_link_rate": 66.7, "orphan_defects": 1},
+  "gaps": [{"level": "warning", "text": "1 个缺陷没有来源用例/执行记录/批次,追溯链断裂"}]
+}
+```
+
+体检会报出五类断链:需求无用例覆盖(`warning`)、用例未关联需求(`info`)、
+缺陷无来源(`warning`)、批次未圈选范围(`info`)、执行记录未归属环境(`info`)。
+一项都没有时返回单条 `level=success` 的「追溯关系完整,没有发现断链」。
+`orphan_defects` 只统计用例、执行记录、批次三者全空的缺陷。
+
+### 与既有追溯接口的关系
+
+`/api/testcases/{id}/traceability`、`/api/defects/{id}/traceability`、需求覆盖率矩阵行内的
+`traceability` 仍然保留,给列表页弹窗用;血缘接口在其之上做整图与影响面分析,两者口径一致:
+用例追溯的缺陷集合同样包含「仅挂执行记录」的缺陷,缺陷追溯同样会从执行记录回溯用例与批次
+(响应里带 `via_run: true` 标记)。
+
+---
+
 ## 通用说明
 
 ### 认证

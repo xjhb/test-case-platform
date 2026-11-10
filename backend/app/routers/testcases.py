@@ -7,7 +7,7 @@ from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -555,10 +555,14 @@ def testcase_traceability(
             "plan_version": plan.version if plan else None,
         })
 
-    # 关联的缺陷
+    # 关联的缺陷: 直接挂在用例上的 + 由该用例执行记录产生的
+    run_ids = [r.id for r in runs]
+    conds = [Defect.testcase_id == tcid]
+    if run_ids:
+        conds.append(Defect.run_id.in_(run_ids))
     defects = list(
         db.execute(
-            select(Defect).where(Defect.testcase_id == tcid).order_by(Defect.created_at.desc())
+            select(Defect).where(or_(*conds)).order_by(Defect.created_at.desc())
         ).scalars()
     )
     defect_list = [{

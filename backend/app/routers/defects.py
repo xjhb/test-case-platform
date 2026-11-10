@@ -524,28 +524,42 @@ def defect_traceability(
             }
 
     # 关联的执行记录
-    if defect.run_id:
-        run = db.get(TestRun, defect.run_id)
-        if run:
-            executor = db.get(User, run.executed_by)
-            result["run"] = {
-                "id": run.id,
-                "status": run.status,
-                "stage": run.stage,
-                "remark": run.remark,
-                "executed_at": run.executed_at.isoformat() if run.executed_at else None,
-                "executed_by": executor.display_name or executor.username if executor else None,
+    run = db.get(TestRun, defect.run_id) if defect.run_id else None
+    if run:
+        executor = db.get(User, run.executed_by)
+        result["run"] = {
+            "id": run.id,
+            "status": run.status,
+            "stage": run.stage,
+            "remark": run.remark,
+            "executed_at": run.executed_at.isoformat() if run.executed_at else None,
+            "executed_by": executor.display_name or executor.username if executor else None,
+        }
+
+    # 缺陷只挂了执行记录时,用例与批次从执行记录回溯,否则来源弹窗会显示为空
+    if not result["testcase"] and run:
+        tc = db.get(TestCase, run.testcase_id)
+        if tc:
+            result["testcase"] = {
+                "id": tc.id,
+                "title": tc.title,
+                "module": tc.module,
+                "priority": tc.priority,
+                "status": tc.status,
+                "via_run": True,
             }
 
     # 关联的测试计划
-    if defect.plan_id:
-        plan = db.get(TestPlan, defect.plan_id)
-        if plan:
-            result["plan"] = {
-                "id": plan.id,
-                "version": plan.version,
-                "current_stage": plan.current_stage,
-                "status": plan.status,
-            }
+    plan = db.get(TestPlan, defect.plan_id) if defect.plan_id else None
+    if not plan and run and run.plan_id:
+        plan = db.get(TestPlan, run.plan_id)
+    if plan:
+        result["plan"] = {
+            "id": plan.id,
+            "version": plan.version,
+            "current_stage": plan.current_stage,
+            "status": plan.status,
+            "via_run": not defect.plan_id,
+        }
 
     return result
