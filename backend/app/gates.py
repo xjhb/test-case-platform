@@ -9,11 +9,13 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from .dictionaries import urgent_labels
 from .models import Defect, StageGate, TestCase, TestPlan, TestRun
 from .scope import plan_case_ids
 
 STAGES = ["SIT", "UAT", "PRE"]
 KINDS = ["准入", "准出"]
+# 字典被清空时的兜底,保证门禁不会因缺配置而漏放高危缺陷
 CRITICAL_SEVERITY = ("致命", "严重")
 APPROVED_REVIEW = ("已批准",)
 
@@ -36,9 +38,16 @@ RULE_LIST = [
     RuleDef("pending_max", "未执行用例不超过", "条", "<=", "尚未执行的用例数"),
     RuleDef("review_approved_min", "评审通过率不低于", "%", ">=", "圈选用例中评审状态为已批准的比例"),
     RuleDef("open_defects_max", "未关闭缺陷不超过", "个", "<=", "关联本计划或本范围用例的未关闭缺陷"),
-    RuleDef("open_critical_defects_max", "未关闭致命/严重缺陷不超过", "个", "<=", "准出前必须清零的高危缺陷"),
+    RuleDef("open_critical_defects_max", "未关闭紧急缺陷不超过", "个", "<=",
+            "严重程度在数据字典里标记为「计入紧急」的未关闭缺陷,准出前必须清零"),
 ]
 RULES = {r.key: r for r in RULE_LIST}
+
+
+def critical_severities(db: Session, project_id: int) -> tuple[str, ...]:
+    """哪些严重程度算高危由数据字典决定,项目级覆盖全局"""
+    labels = urgent_labels(db, "defect_severity", project_id)
+    return tuple(labels) if labels else CRITICAL_SEVERITY
 
 
 def metrics(db: Session, plan: TestPlan, stage: str) -> dict:
@@ -78,12 +87,13 @@ def metrics(db: Session, plan: TestPlan, stage: str) -> dict:
         )
 
     case_id_set = set(case_ids)
+    critical = critical_severities(db, plan.project_id)
     open_defects = 0
     open_critical = 0
     for d in db.execute(select(Defect).where(Defect.project_id == plan.project_id, Defect.status != "关闭")).scalars():
         if d.plan_id == plan.id or (d.testcase_id and d.testcase_id in case_id_set):
             open_defects += 1
-            if d.severity in CRITICAL_SEVERITY:
+            if d.severity in critical:
                 open_critical += 1
 
     def pct(n: int) -> float:

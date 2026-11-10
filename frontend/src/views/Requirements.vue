@@ -15,9 +15,7 @@
           <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" />
         </el-select>
         <el-select v-model="query.priority" placeholder="优先级" clearable style="width: 120px" @change="loadData">
-          <el-option label="高" value="高" />
-          <el-option label="中" value="中" />
-          <el-option label="低" value="低" />
+          <el-option v-for="o in priorityOptions" :key="o" :label="o" :value="o" />
         </el-select>
         <el-select v-model="query.status" placeholder="状态" clearable style="width: 120px" @change="loadData">
           <el-option label="待处理" value="待处理" />
@@ -206,9 +204,7 @@
         </el-form-item>
         <el-form-item label="优先级">
           <el-select v-model="form.priority" style="width: 120px">
-            <el-option label="高" value="高" />
-            <el-option label="中" value="中" />
-            <el-option label="低" value="低" />
+            <el-option v-for="o in priorityOptions" :key="o" :label="o" :value="o" />
           </el-select>
         </el-form-item>
         <el-form-item label="状态">
@@ -276,9 +272,10 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { projectApi, requirementApi, testcaseApi } from '../api'
+import { useDict } from '../composables/useDict'
 
 const viewMode = ref('list')
 const projects = ref([])
@@ -297,11 +294,11 @@ const query = reactive({
   page_size: 20,
 })
 
-const priorityTagType = (p) => ({ 高: 'danger', 中: 'warning', 低: 'info' }[p] || 'info')
+const priorityTagType = (p) => dict.tagType('requirement_priority', p)
 const statusTagType = (s) => ({ 待处理: 'info', 进行中: 'warning', 已完成: 'success', 已关闭: '' }[s] || 'info')
 const tcStatusType = (s) => ({ 通过: 'success', 失败: 'danger', 阻塞: 'warning' }[s] || 'info')
 const runTagType = (s) => ({ 通过: 'success', 失败: 'danger', 阻塞: 'warning' }[s] || 'info')
-const severityTagType = (s) => ({ 致命: 'danger', 严重: 'danger', 一般: 'warning', 提示: 'info' }[s] || 'info')
+const severityTagType = (s) => dict.tagType('defect_severity', s)
 
 async function loadProjects() {
   projects.value = await projectApi.list()
@@ -380,13 +377,23 @@ const rules = {
   title: [{ required: true, message: '请输入需求标题', trigger: 'blur' }],
 }
 
+// 优先级走数据字典(项目项覆盖全局);需求状态是状态机口径,固定
+const dictProjectId = computed(() => (dialogVisible.value ? form.project_id : null) || query.project_id || null)
+const dict = useDict(dictProjectId)
+const priorityOptions = computed(() => dict.labels('requirement_priority'))
+
+watch(priorityOptions, (opts) => {
+  if (!dialogVisible.value || !opts.length) return
+  if (!opts.includes(form.priority)) form.priority = dict.pick('requirement_priority', '中')
+})
+
 function resetForm() {
   form.id = null
   form.project_id = query.project_id || ''
   form.req_no = ''
   form.title = ''
   form.description = ''
-  form.priority = '中'
+  form.priority = dict.pick('requirement_priority', '中')
   form.status = '待处理'
 }
 

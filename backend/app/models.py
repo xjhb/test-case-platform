@@ -53,6 +53,12 @@ class Project(Base):
     is_key_project: Mapped[bool] = mapped_column(Boolean, default=False)  # 是否重点项目
     is_started: Mapped[bool] = mapped_column(Boolean, default=False)  # 启动状态
     starred: Mapped[bool] = mapped_column(Boolean, default=False)  # 关注(星标)
+    template_id: Mapped[int | None] = mapped_column(
+        ForeignKey("project_templates.id", ondelete="SET NULL"), nullable=True, index=True
+    )  # 创建时套用的模板,仅作溯源记录
+    default_sit_days: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 项目级SIT默认天数,空则取全局配置
+    default_uat_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    default_pre_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class TestCase(Base):
@@ -248,7 +254,7 @@ class Defect(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     title: Mapped[str] = mapped_column(String(255), index=True)
     description: Mapped[str] = mapped_column(Text, default="")
-    severity: Mapped[str] = mapped_column(String(16), default="中")  # 致命/严重/一般/提示
+    severity: Mapped[str] = mapped_column(String(16), default="一般", server_default="一般")  # 致命/严重/一般/提示
     priority: Mapped[str] = mapped_column(String(8), default="P1")  # P0/P1/P2/P3
     status: Mapped[str] = mapped_column(String(16), default="新建")  # 新建/处理中/已修复/已验证/关闭/重新打开
     testcase_id: Mapped[int | None] = mapped_column(ForeignKey("testcases.id", ondelete="SET NULL"), nullable=True, index=True)
@@ -477,3 +483,45 @@ class DefectExternal(Base):
     synced_status: Mapped[str] = mapped_column(String(32), default="")
     synced_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+
+# ===================== P2-3: 数据字典 =====================
+class DictItem(Base):
+    """可配置枚举项:project_id 为空表示全局默认项,项目级同名项覆盖全局项"""
+
+    __tablename__ = "dict_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    dict_key: Mapped[str] = mapped_column(String(32), index=True)  # case_priority/case_module/...
+    project_id: Mapped[int | None] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    label: Mapped[str] = mapped_column(String(64))  # 选项文本,同时是入库值
+    color: Mapped[str] = mapped_column(String(16), default="")  # 标签色:danger/warning/success/info/primary
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1")
+    is_urgent: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")  # 计入"紧急"口径
+    builtin: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")  # 内置默认项,不可删除
+    remark: Mapped[str] = mapped_column(String(255), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+# ===================== P2-3: 项目模板 =====================
+class ProjectTemplate(Base):
+    """新建项目时可套用的默认配置包:阶段天数、门禁、自定义字段、标签、字典项"""
+
+    __tablename__ = "project_templates"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), unique=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    stage_days: Mapped[str] = mapped_column(String(64), default="")  # JSON: {"SIT":7,"UAT":5,"PRE":3}
+    gates: Mapped[str] = mapped_column(Text, default="")  # JSON: [{stage,kind,rule,threshold}]
+    custom_fields: Mapped[str] = mapped_column(Text, default="")  # JSON: [{name,field_type,options,required}]
+    tags: Mapped[str] = mapped_column(Text, default="")  # JSON: [{name,color}]
+    dict_items: Mapped[str] = mapped_column(Text, default="")  # JSON: [{dict_key,label,color,sort_order,is_urgent}]
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())

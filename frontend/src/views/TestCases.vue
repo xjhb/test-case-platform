@@ -1,9 +1,10 @@
 <script setup>
-import { ref, reactive, onMounted, onBeforeUnmount, computed } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { projectApi, testcaseApi, runApi, uploadApi, planApi, importApi, testcaseExportUrl, p2Api, userApi, envApi } from '../api'
 import { useAuthStore } from '../stores/auth'
+import { useDict } from '../composables/useDict'
 
 const route = useRoute()
 const router = useRouter()
@@ -73,12 +74,8 @@ const STATUS_OPTIONS = [
   { label: '失败', value: '失败' },
   { label: '阻塞', value: '阻塞' },
 ]
-const PRIORITY_OPTIONS = [
-  { label: 'P0', value: 'P0' },
-  { label: 'P1', value: 'P1' },
-  { label: 'P2', value: 'P2' },
-  { label: 'P3', value: 'P3' },
-]
+const PRIORITY_OPTIONS = computed(() => dict.labels('case_priority'))
+const MODULE_OPTIONS = computed(() => dict.labels('case_module'))
 const REVIEW_STATUS_OPTIONS = [
   { label: '草稿', value: '草稿' },
   { label: '评审中', value: '评审中' },
@@ -87,7 +84,8 @@ const REVIEW_STATUS_OPTIONS = [
 ]
 
 const statusTagType = (s) => ({ 未执行: 'info', 通过: 'success', 失败: 'danger', 阻塞: 'warning' }[s] || 'info')
-const priorityTagType = (p) => ({ P0: 'danger', P1: 'warning', P2: 'primary', P3: 'info' }[p] || 'info')
+const priorityTagType = (p) => dict.tagType('case_priority', p)
+const reqPriorityTagType = (p) => dict.tagType('requirement_priority', p)
 const reviewStatusTagType = (s) => ({ 草稿: 'info', 评审中: 'warning', 已批准: 'success', 已驳回: 'danger' }[s] || 'info')
 
 const projects = ref([])
@@ -260,6 +258,15 @@ const rules = {
   priority: [{ required: true, message: '请选择优先级', trigger: 'change' }],
 }
 
+// 优先级/模块走数据字典(项目项覆盖全局),执行结果与评审状态是状态机口径
+const dictProjectId = computed(() => (dialogVisible.value ? form.project_id : null) || query.project_id || null)
+const dict = useDict(dictProjectId)
+
+watch(PRIORITY_OPTIONS, (opts) => {
+  if (!dialogVisible.value || !opts.length) return
+  if (!opts.includes(form.priority)) form.priority = dict.pick('case_priority', 'P1')
+})
+
 function resetForm() {
   form.id = null
   form.project_id = query.project_id || ''
@@ -268,7 +275,7 @@ function resetForm() {
   form.precondition = ''
   form.steps = ''
   form.expected = ''
-  form.priority = 'P1'
+  form.priority = dict.pick('case_priority', 'P1')
   stepRows.value = []
   stepsDirty.value = false
 }
@@ -643,7 +650,8 @@ const traceVisible = ref(false)
 const traceLoading = ref(false)
 const traceTitle = ref('')
 const traceData = ref({ runs: [], defects: [], requirements: [] })
-const severityTagType = (s) => ({ 致命: 'danger', 严重: 'danger', 一般: 'warning', 提示: 'info' }[s] || 'info')
+const severityTagType = (s) => dict.tagType('defect_severity', s)
+const defectPriorityTagType = (p) => dict.tagType('defect_priority', p)
 const defectStatusType = (s) => ({ 新建: 'info', 处理中: 'warning', 已修复: 'primary', 已验证: 'success', 关闭: '', 重新打开: 'danger' }[s] || 'info')
 const reqStatusType = (s) => ({ 待处理: 'info', 进行中: 'warning', 已完成: 'success', 已关闭: '' }[s] || 'info')
 
@@ -1044,7 +1052,7 @@ onBeforeUnmount(() => {
         <el-option v-for="s in STATUS_OPTIONS" :key="s.value" :label="s.label" :value="s.value" />
       </el-select>
       <el-select v-model="query.priority" placeholder="优先级" clearable style="width: 110px">
-        <el-option v-for="p in PRIORITY_OPTIONS" :key="p.value" :label="p.label" :value="p.value" />
+        <el-option v-for="p in PRIORITY_OPTIONS" :key="p" :label="p" :value="p" />
       </el-select>
       <el-select v-model="query.review_status" placeholder="评审状态" clearable style="width: 130px">
         <el-option v-for="s in REVIEW_STATUS_OPTIONS" :key="s.value" :label="s.label" :value="s.value" />
@@ -1052,7 +1060,10 @@ onBeforeUnmount(() => {
       <el-input v-model="query.keyword" placeholder="搜索标题/模块" clearable style="width: 200px" @keyup.enter="search" />
       <el-button type="primary" @click="search">查询</el-button>
       <el-button @click="resetQuery">重置</el-button>
-      <el-button type="success" @click="openImport" style="margin-left: auto">
+      <el-button type="primary" @click="openCreate" style="margin-left: auto">
+        <el-icon><Plus /></el-icon>新建用例
+      </el-button>
+      <el-button type="success" @click="openImport">
         <el-icon><Upload /></el-icon>导入用例
       </el-button>
       <el-button type="warning" @click="exportTestcases" :disabled="!query.project_id">
@@ -1195,14 +1206,17 @@ onBeforeUnmount(() => {
           </el-select>
         </el-form-item>
         <el-form-item label="模块" prop="module">
-          <el-input v-model="form.module" placeholder="例如:登录/下单/退款" />
+          <el-select v-model="form.module" filterable allow-create default-first-option clearable
+                     placeholder="例如:登录/下单/退款" style="width:100%">
+            <el-option v-for="m in MODULE_OPTIONS" :key="m" :label="m" :value="m" />
+          </el-select>
         </el-form-item>
         <el-form-item label="用例标题" prop="title">
           <el-input v-model="form.title" placeholder="一句话描述测试点" />
         </el-form-item>
         <el-form-item label="优先级" prop="priority">
           <el-select v-model="form.priority" style="width: 120px">
-            <el-option v-for="p in PRIORITY_OPTIONS" :key="p.value" :label="p.label" :value="p.value" />
+            <el-option v-for="p in PRIORITY_OPTIONS" :key="p" :label="p" :value="p" />
           </el-select>
         </el-form-item>
         <el-form-item label="前置条件">
@@ -1431,7 +1445,7 @@ onBeforeUnmount(() => {
             <el-table-column prop="title" label="需求标题" min-width="200" show-overflow-tooltip />
             <el-table-column label="优先级" width="90">
               <template #default="{ row }">
-                <el-tag :type="({ 高: 'danger', 中: 'warning', 低: 'info' })[row.priority] || 'info'" size="small">{{ row.priority }}</el-tag>
+                <el-tag :type="reqPriorityTagType(row.priority)" size="small">{{ row.priority }}</el-tag>
               </template>
             </el-table-column>
             <el-table-column label="状态" width="100">
@@ -1486,7 +1500,11 @@ onBeforeUnmount(() => {
                 <el-tag :type="severityTagType(row.severity)" size="small">{{ row.severity }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="priority" label="优先级" width="80" />
+            <el-table-column label="优先级" width="90">
+              <template #default="{ row }">
+                <el-tag :type="defectPriorityTagType(row.priority)" size="small">{{ row.priority }}</el-tag>
+              </template>
+            </el-table-column>
             <el-table-column label="状态" width="100">
               <template #default="{ row }">
                 <el-tag :type="defectStatusType(row.status)" size="small">{{ row.status }}</el-tag>

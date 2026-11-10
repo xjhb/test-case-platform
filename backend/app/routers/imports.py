@@ -7,6 +7,7 @@ from openpyxl import Workbook, load_workbook
 from sqlalchemy.orm import Session
 
 from ..database import get_db
+from ..dictionaries import labels, options
 from ..deps import get_current_user, require_project_access
 from ..logger import log_op
 from ..models import TestCase, User
@@ -14,7 +15,12 @@ from ..models import TestCase, User
 router = APIRouter(prefix="/api/imports", tags=["用例导入"], dependencies=[Depends(get_current_user)])
 
 COLUMNS = ["模块", "用例标题", "前置条件", "测试步骤", "预期结果", "优先级"]
-VALID_PRIORITY = {"P0", "P1", "P2", "P3"}
+
+
+def _priority_fallback(db: Session, project_id: int) -> str:
+    """导入时优先级为空或不在字典内,取字典首项而不是写死 P1"""
+    opts = options(db, "case_priority", project_id)
+    return opts[0]["label"] if opts else "P1"
 
 
 @router.get("/template")
@@ -89,8 +95,8 @@ async def import_testcases(
             failed += 1
             errors.append(f"第{idx}行:用例标题为空,已跳过")
             continue
-        if priority not in VALID_PRIORITY:
-            priority = "P1"
+        if priority not in labels(db, "case_priority", project_id):
+            priority = _priority_fallback(db, project_id)
         db.add(
             TestCase(
                 project_id=project_id,

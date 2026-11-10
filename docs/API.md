@@ -31,6 +31,8 @@
 - [21. 我的待办 `/api/todo`](#21-我的待办)
 - [22. 测试环境 `/api/environments`](#22-测试环境)
 - [23. 阶段门禁 `/api/gates`](#23-阶段门禁)
+- [24. 数据字典 `/api/dict`](#24-数据字典)
+- [25. 项目模板 `/api/project-templates`](#25-项目模板)
 
 ---
 
@@ -82,6 +84,22 @@
 | PUT | `/{id}` | 更新项目 | Admin |
 | PATCH | `/{id}/star` | 切换关注星标 | 项目成员 |
 | DELETE | `/{id}` | 删除项目 | Admin |
+
+### 创建项目时套用模板
+
+`POST /api/projects` 额外接受 `template_id` 与三个阶段天数字段:
+
+```json
+{ "name": "核心系统改造", "project_no": "P2026-01", "template_id": 1,
+  "default_sit_days": 12, "default_uat_days": 5, "default_pre_days": null }
+```
+
+- `template_id` 省略时使用标记为默认的模板;传 `0` 表示明确不套用任何模板;传不存在的 ID → `400 项目模板不存在`
+- 模板里的门禁、自定义字段、标签、字典项按 [25. 项目模板](#25-项目模板) 的套用规则写入本项目
+- 三个阶段天数取值范围 1-365,留空(`null`)表示跟随全局阶段配置;显式传入的天数覆盖模板天数
+
+`PUT /api/projects/{id}` 支持 `"template_id": null`(或 `0`)解除模板来源记录,只清来源,不动已经套用到项目里的配置。
+被项目记录的模板不允许删除,解除来源后才能删掉模板,历史项目的配置不受影响。
 
 ---
 
@@ -231,7 +249,7 @@
 - `admin` 可强制流转到任意合法状态值(用于误操作纠正),普通成员只能按上表流转。
 - 同状态提交视为无操作,直接放行。
 - 时间戳维护: 进入 `已修复` 写 `resolved_at`;进入 `关闭` 写 `closed_at`;进入 `重新打开` 或退回 `处理中` 时清空 `resolved_at` 与 `closed_at`。
-- 通知联动: `已修复` 时通知提单人验证,`重新打开` 时通知处理人;`致命/严重` 或 `P0/P1` 额外推送群机器人。
+- 通知联动: `已修复` 时通知提单人验证,`重新打开` 时通知处理人;严重程度或优先级命中数据字典「计入紧急」标记的额外推送群机器人(见 24. 数据字典)。
 
 ### 缺陷附件
 
@@ -246,6 +264,9 @@
 `致命` / `严重` / `一般` / `提示`
 
 优先级: `P0` / `P1` / `P2` / `P3`
+
+> 以上为数据字典的内置默认取值，实际可配置项与「计入紧急」标记以 `GET /api/dict/options?dict_key=...` 为准（见 24. 数据字典）；
+> 接口写入时按字典校验，创建缺陷未传 `severity` 时默认 `一般`。
 
 ---
 
@@ -334,7 +355,7 @@
 
 > 站内信始终写入并随业务事务提交;邮件与群机器人属于外部通道,在后台线程尽力投递,
 > 投递结果只记录到 `push_result` 字段,失败不影响业务接口。
-> 只有 `broadcast=true` 的场景(缺陷严重程度为 致命/严重 或优先级 P0/P1、阶段到期提醒)
+> 只有 `broadcast=true` 的场景(缺陷严重程度或优先级命中数据字典「计入紧急」标记、阶段到期提醒)
 > 才会推送到群机器人,避免群消息刷屏。
 > 同一天同一计划的同一阶段只会产生一条到期提醒,可重复调用 `/scan-stage` 验证幂等。
 
@@ -750,7 +771,7 @@
 | `pending_max` | 未执行用例不超过(条) | `<=` |
 | `review_approved_min` | 评审通过率不低于(%) | `>=` |
 | `open_defects_max` | 未关闭缺陷不超过(个) | `<=` |
-| `open_critical_defects_max` | 未关闭致命/严重缺陷不超过(个) | `<=` |
+| `open_critical_defects_max` | 未关闭紧急缺陷不超过(个)；紧急口径由字典 `defect_severity` 的「计入紧急」项决定 | `<=` |
 
 指标口径与 `GET /api/plans/{id}/progress` 完全一致:分母是计划圈选的用例(未圈选回退项目全部用例),
 执行结果取该阶段每条用例的最近一次记录;缺陷统计覆盖本计划或本范围内用例。
@@ -775,6 +796,111 @@
 ### POST /api/plans/{id}/complete
 
 请求体同上(只需 `force`/`reason`),按当前阶段准出校验;`/{id}/reopen` 把已完成计划退回进行中并留痕。
+
+---
+
+## 24. 数据字典
+
+**前缀**: `/api/dict`
+
+字典**类型**由代码固定,字典**取值**在后台可维护,用来替代原先散落在前后端的硬编码枚举。
+取值分两层:`project_id` 为空是全局默认项(仅管理员维护),项目下同名 `label` 的项覆盖全局项
+(包括把 `enabled=false` 用来隐藏某个内置项)。内置默认项永远作为兜底,删不掉也改不了名。
+
+| 方法 | 路径 | 说明 | 权限 |
+|------|------|------|------|
+| GET | `/types` | 类型目录:`configurable` 可维护 + `locked` 固定口径及原因 | 已登录 |
+| GET | `/options` | 单个类型的启用项 `?dict_key&project_id`(下拉框取值) | 项目成员 |
+| GET | `/effective` | 一次取回全部类型有效项 `?project_id`(省略则按全局口径,前端缓存 60s) | 项目成员 |
+| GET | `` | 配置页视图 `?dict_key&project_id`,含停用项与来源标记 | 项目成员 |
+| POST | `` | 新增选项 | 全局=Admin;项目=Tester+ |
+| PUT | `/{item_id}` | 改名/色值/排序/启停/计入紧急 | 全局=Admin;项目=Tester+ |
+| DELETE | `/{item_id}` | 删除自定义选项(内置项返回 400) | 全局=Admin;项目=Tester+ |
+
+### 可维护类型
+
+| key | 名称 | mode | 计入紧急 | 内置默认项 |
+|-----|------|------|----------|------------|
+| `case_priority` | 用例优先级 | validate | 是 | P0 / P1 / P2 / P3 |
+| `case_module` | 用例模块 | suggest | 否 | 登录 / 交易 / 退款 / 报表 |
+| `defect_severity` | 缺陷严重程度 | validate | 是 | 致命 / 严重 / 一般 / 提示 |
+| `defect_priority` | 缺陷优先级 | validate | 是 | P0 / P1 / P2 / P3 |
+| `requirement_priority` | 需求优先级 | validate | 否 | 高 / 中 / 低 |
+
+`mode=validate` 的写入(新建/编辑用例、需求、缺陷)会校验取值,非法值报
+`400 优先级只能是: P0、P1、P2、P3`;历史数据里已存在的旧值靠 `current=` 逃生,不至于改一条记录就被拦下。
+`mode=suggest` 只做提示不做拦截(模块名允许自由填写)。
+`is_urgent` 取代了原先写死的"致命/严重/P0/P1"集合,哪些算紧急由字典项决定,影响缺陷列表的紧急标记、通知广播与门禁统计。
+`case_priority` 中排序最前的启用项即统计口径里的「最高优先级」,数据看板的严重缺陷占比按它取分母,不再写死 `P0`。
+
+### 固定口径(只读)
+
+| key | 名称 | 不能配置的原因 |
+|-----|------|----------------|
+| `stage` | 测试阶段 SIT/UAT/PRE | 阶段推进、门禁规则、报告分阶段统计均按此固定顺序取数 |
+| `run_status` | 执行结果 未执行/通过/失败/阻塞 | 通过率、执行率与准出门禁直接按这几个值聚合 |
+| `review_status` | 用例评审状态 | 评审计数与「已批准」门禁条件依赖固定状态串 |
+| `defect_status` | 缺陷状态 | 缺陷状态机与待办、通知路由依赖这组状态及其流转关系 |
+
+### 示例
+
+```http
+POST /api/dict
+{ "dict_key": "case_priority", "project_id": 3, "label": "P0-冒烟", "color": "danger",
+  "sort_order": 0, "is_urgent": true, "remark": "核心链路" }
+```
+
+```json
+// GET /api/dict/effective?project_id=3  (节选)
+{ "case_priority": [
+    { "id": null, "label": "P0", "color": "danger", "sort_order": 1,
+      "enabled": true, "is_urgent": true, "builtin": true, "source": "default" },
+    { "id": 81, "label": "P0-冒烟", "color": "danger", "sort_order": 0,
+      "enabled": true, "is_urgent": true, "builtin": false, "source": "project" } ] }
+```
+
+`GET /api/dict` 与 `/effective` 的读取范围只有「全局行 + 本项目行」,不会把其他项目的自定义项串过来;
+传 `project_id` 时要求是该项目的成员。
+
+---
+
+## 25. 项目模板
+
+**前缀**: `/api/project-templates`
+
+一个模板打包五类配置:阶段天数 `stage_days`、门禁规则 `gates`、自定义字段 `custom_fields`、
+标签 `tags`、字典项 `dict_items`。新建项目时选择模板即自动套用,已有项目也可手动套用。
+
+| 方法 | 路径 | 说明 | 权限 |
+|------|------|------|------|
+| GET | `` | 模板列表(默认模板排最前) | 已登录 |
+| POST | `` | 新建模板 | Admin |
+| PUT | `/{id}` | 编辑模板 | Admin |
+| DELETE | `/{id}` | 删除模板 | Admin |
+| POST | `/{id}/apply?project_id=` | 套用到已有项目 | 该项目 Tester+ |
+| GET | `/collect/{project_id}` | 把现有项目配置导出成模板草稿 | 该项目成员 |
+
+### 套用是幂等的
+
+`apply` 按签名去重,重复套用不会堆叠配置,只补齐缺少的部分;响应返回各项写入条数与跳过条数:
+
+```json
+{ "template_id": 1, "project_id": 3, "stage_days": 1, "gates": 2, "custom_fields": 0,
+  "tags": 1, "dict_items": 3, "skipped": 4 }
+```
+
+去重签名:门禁按 `(stage, kind, rule)`,自定义字段按名称,标签按名称,字典项按 `(dict_key, label)`;
+阶段天数只在项目当前值与模板不同时才写。套进来的字典项落在**该项目**的 `dict_items` 行(`builtin=false`),
+不影响全局默认项。
+
+### 校验与来源记录
+
+- `stage_days` 的 key 只能是 `SIT/UAT/PRE`,值为 1-365 的整数
+- `gates` 的 `stage/kind/rule` 必须在门禁规则目录内,阈值不能为负
+- `dict_items` 的 `dict_key` 必须是已登记的字典类型,`label` 不能为空
+- 模板名称唯一;`is_default=true` 的模板全库只有一个,设置新默认会自动取消旧的
+- `projects.template_id` 记录来源。被引用的模板不允许删除,先 `PUT /api/projects/{id} {"template_id": 0}` 解除来源
+- 默认模板被删除时,剩余模板中 ID 最小的自动接位;服务启动时若发现没有任何默认模板也会补上,避免新建项目失去默认套用来源
 
 ---
 

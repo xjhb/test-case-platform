@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
+from ..dictionaries import check_400, urgent_labels
 from ..deps import accessible_project_ids, get_current_user, require_project_access
 from ..logger import log_op
 from ..models import Defect, DefectAttachment, Project, TestCase, TestPlan, TestRun, User
@@ -17,12 +18,8 @@ from ..schemas import DefectAttachmentOut, DefectCreate, DefectOut, DefectUpdate
 
 router = APIRouter(prefix="/api/defects", tags=["缺陷管理"], dependencies=[Depends(get_current_user)])
 
-VALID_SEVERITY = {"致命", "严重", "一般", "提示"}
-VALID_PRIORITY = {"P0", "P1", "P2", "P3"}
+# 缺陷状态是状态机的键,保持固定;严重程度与优先级走数据字典,可按项目配置
 VALID_STATUS = {"新建", "处理中", "已修复", "已验证", "关闭", "重新打开"}
-# 达到这个量级的缺陷才推群机器人,普通缺陷只写站内信
-URGENT_SEVERITY = {"致命", "严重"}
-URGENT_PRIORITY = {"P0", "P1"}
 
 # 缺陷状态机:与主流平台一致,修复后必须由提单人验证才能关闭
 STATUS_TRANSITIONS: dict[str, list[str]] = {
@@ -111,8 +108,10 @@ def _to_out(db: Session, d: Defect, attachment_count: int | None = None) -> Defe
     )
 
 
-def _is_urgent(d: Defect) -> bool:
-    return d.severity in URGENT_SEVERITY or d.priority in URGENT_PRIORITY
+def _is_urgent(db: Session, d: Defect) -> bool:
+    """紧急口径由字典项的"计入紧急"标记决定,不再写死值串"""
+    return (d.severity in urgent_labels(db, "defect_severity", d.project_id)
+            or d.priority in urgent_labels(db, "defect_priority", d.project_id))
 
 
 
@@ -125,7 +124,7 @@ def _notify_assignee(db: Session, d: Defect, operator: User, action: str) -> Non
         f"{action}: {d.title}",
         f"严重程度: {d.severity}, 优先级: {d.priority}, 操作人: {who}",
         f"/defects?focus={d.id}",
-        broadcast=_is_urgent(d),
+        broadcast=_is_urgent(db, d),
     )
 
 
@@ -196,10 +195,8 @@ def create_defect(
     current: User = Depends(get_current_user),
 ):
     require_project_access(body.project_id, db, current)
-    if body.severity not in VALID_SEVERITY:
-        raise HTTPException(400, f"严重程度只能是: {', '.join(VALID_SEVERITY)}")
-    if body.priority not in VALID_PRIORITY:
-        raise HTTPException(400, f"优先级只能是: {', '.join(VALID_PRIORITY)}")
+    check_400(db, "defect_severity", body.severity, body.project_id)
+    check_400(db, "defect_priority", body.priority, body.project_id)
 
     d = Defect(
         title=body.title,
@@ -258,13 +255,11 @@ def update_defect(
     if body.description is not None:
         d.description = body.description
     if body.severity is not None:
-        if body.severity not in VALID_SEVERITY:
-            raise HTTPException(400, f"严重程度只能是: {', '.join(VALID_SEVERITY)}")
+        check_400(db, "defect_severity", body.severity, d.project_id, current=d.severity)
         d.severity = body.severity
         changes.append("严重程度")
     if body.priority is not None:
-        if body.priority not in VALID_PRIORITY:
-            raise HTTPException(400, f"优先级只能是: {', '.join(VALID_PRIORITY)}")
+        check_400(db, "defect_priority", body.priority, d.project_id, current=d.priority)
         d.priority = body.priority
         changes.append("优先级")
     if body.status is not None:
@@ -296,7 +291,7 @@ def update_defect(
             f"缺陷已修复,请验证: {d.title}",
             f"处理人: {who}, 严重程度: {d.severity}, 优先级: {d.priority}",
             f"/defects?focus={d.id}",
-            broadcast=_is_urgent(d),
+            broadcast=_is_urgent(db, d),
         )
     elif status_changed_to == "重新打开" and d.assignee_id and d.assignee_id != current.id:
         emit(
@@ -304,7 +299,7 @@ def update_defect(
             f"缺陷被重新打开: {d.title}",
             f"操作人: {who}, 原因: {d.description[:80] or '未填写'}",
             f"/defects?focus={d.id}",
-            broadcast=_is_urgent(d),
+            broadcast=_is_urgent(db, d),
         )
 
     return _to_out(db, d)

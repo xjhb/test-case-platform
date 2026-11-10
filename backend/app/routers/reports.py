@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..deps import accessible_project_ids, get_current_user, require_project_access
+from ..gates import critical_severities
 from ..logger import log_op
 from ..models import Defect, Project, TestCase, TestPlan, TestReport, TestRun, User
 from ..pdf import build_report_pdf
@@ -123,17 +124,19 @@ def export_plan_report_pdf(plan_id: int, db: Session = Depends(get_db), current:
         for d in defects
     ]
     cur = stage_rows[STAGE_ORDER.index(plan.current_stage)]
-    open_critical = sum(1 for d in defects if d.severity in ("致命", "严重") and d.status != "关闭")
+    critical = critical_severities(db, plan.project_id)
+    critical_txt = "/".join(critical)
+    open_critical = sum(1 for d in defects if d.severity in critical and d.status != "关闭")
     conclusion = (
         f"共 {total} 条用例,{plan.current_stage} 阶段通过 {cur[2]} 条,通过率 {cur[6]},未执行 {cur[5]} 条。"
-        f"关联缺陷 {len(defects)} 个,其中未关闭的致命/严重缺陷 {open_critical} 个。"
+        f"关联缺陷 {len(defects)} 个,其中未关闭的紧急缺陷({critical_txt}) {open_critical} 个。"
     )
     if open_critical:
-        conclusion += "\n存在致命或严重缺陷未关闭,建议完成修复与回归验证后再申请准出。"
+        conclusion += f"\n存在{critical_txt}缺陷未关闭,建议完成修复与回归验证后再申请准出。"
     elif cur[5]:
         conclusion += "\n尚有未执行用例,建议补齐执行后再出具验收结论。"
     else:
-        conclusion += "\n纳入范围的用例已全部执行,无遗留致命/严重缺陷。"
+        conclusion += "\n纳入范围的用例已全部执行,无遗留紧急缺陷。"
 
     info_rows = [
         ["项目名称", project.name if project else "", "计划版本", plan.version],
@@ -383,7 +386,7 @@ def _generate_report_data(db: Session, plan_id: int, stage: str, current: User) 
         select(Defect).where(Defect.plan_id == plan_id, Defect.status != "关闭")
     ).scalars())
     defect_count = len(defects)
-    critical_defects = sum(1 for d in defects if d.severity in ("致命", "严重"))
+    critical_defects = sum(1 for d in defects if d.severity in critical_severities(db, plan.project_id))
 
     summary_data = {
         "plan": {"id": plan.id, "version": plan.version, "project_id": plan.project_id},
@@ -572,15 +575,15 @@ def export_generated_report_pdf(
         ["用例总数", r.total_cases, "通过", r.passed_cases],
         ["失败", r.failed_cases, "阻塞", r.blocked_cases],
         ["未执行", r.unexecuted_cases, "通过率", f"{r.pass_rate}%"],
-        ["缺陷总数", r.defect_count, "致命/严重", r.critical_defects],
+        ["缺陷总数", r.defect_count, "紧急缺陷", r.critical_defects],
     ]
     conclusion = (
         f"本阶段共 {r.total_cases} 条用例,通过 {r.passed_cases} 条,失败 {r.failed_cases} 条,"
         f"阻塞 {r.blocked_cases} 条,未执行 {r.unexecuted_cases} 条,通过率 {r.pass_rate}%。"
-        f"未关闭缺陷 {r.defect_count} 个,其中致命/严重 {r.critical_defects} 个。"
+        f"未关闭缺陷 {r.defect_count} 个,其中紧急缺陷 {r.critical_defects} 个。"
     )
     if r.critical_defects:
-        conclusion += "\n存在致命或严重缺陷,建议修复并回归验证后再准出。"
+        conclusion += "\n存在紧急缺陷未关闭,建议修复并回归验证后再准出。"
     elif r.unexecuted_cases or r.failed_cases:
         conclusion += "\n仍有失败或未执行用例,请确认剩余风险后再准出。"
     else:
@@ -639,7 +642,7 @@ def export_generated_report(
         ("未执行", r.unexecuted_cases),
         ("通过率", f"{r.pass_rate}%"),
         ("缺陷总数", r.defect_count),
-        ("严重缺陷", r.critical_defects),
+        ("紧急缺陷", r.critical_defects),
     ]
     for i, (k, v) in enumerate(summary_rows, start=3):
         ws1.cell(row=i, column=1, value=k).font = Font(bold=True)

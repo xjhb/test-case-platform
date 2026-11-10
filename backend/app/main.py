@@ -18,7 +18,7 @@ from . import models  # noqa: F401  确保模型注册
 from .config import settings
 from .database import Base, engine
 from .notify import start_stage_scheduler
-from .routers import auth, automation, defects, environments, gates, imports, integrations, logs, notifications, p2_features, plans, projects, requirements, reports, runs, stats, system, teams, testcases, todo, uploads, users, versions
+from .routers import auth, automation, data_dict, defects, environments, gates, imports, integrations, logs, notifications, p2_features, plans, projects, requirements, reports, runs, stats, system, teams, templates, testcases, todo, uploads, users, versions
 from .seed import seed_admin
 
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
@@ -234,6 +234,53 @@ def migrate():
                 FOREIGN KEY (testcase_id) REFERENCES testcases(id) ON DELETE CASCADE
             )
         """))
+        # ===================== P2-3: 数据字典 + 项目模板 =====================
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS dict_items (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                dict_key VARCHAR(32) NOT NULL,
+                project_id INT NULL,
+                label VARCHAR(64) NOT NULL,
+                color VARCHAR(16) DEFAULT '',
+                sort_order INT DEFAULT 0,
+                enabled TINYINT(1) DEFAULT 1,
+                is_urgent TINYINT(1) DEFAULT 0,
+                builtin TINYINT(1) DEFAULT 0,
+                remark VARCHAR(255) DEFAULT '',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX idx_dict_key (dict_key),
+                INDEX idx_project_id (project_id),
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS project_templates (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                name VARCHAR(128) NOT NULL UNIQUE,
+                description TEXT,
+                stage_days VARCHAR(64) DEFAULT '',
+                gates TEXT,
+                custom_fields TEXT,
+                tags TEXT,
+                dict_items TEXT,
+                is_default TINYINT(1) DEFAULT 0,
+                created_by INT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+            )
+        """))
+        for col, ddl in [
+            ("template_id", "ADD COLUMN template_id INT NULL"),
+            ("default_sit_days", "ADD COLUMN default_sit_days INT NULL"),
+            ("default_uat_days", "ADD COLUMN default_uat_days INT NULL"),
+            ("default_pre_days", "ADD COLUMN default_pre_days INT NULL"),
+        ]:
+            if not conn.execute(text(f"SHOW COLUMNS FROM projects LIKE '{col}'")).fetchone():
+                conn.execute(text(f"ALTER TABLE projects {ddl}"))
+        # 历史缺陷严重程度默认值曾写为「中」,与校验集合(致命/严重/一般/提示)不一致
+        conn.execute(text("ALTER TABLE defects ALTER COLUMN severity SET DEFAULT '一般'"))
         # ===================== 补齐 ALTER 加列时遗漏的外键约束 =====================
         # 上面用 ALTER TABLE ADD COLUMN 补的列没有 FK,历史上删除父行会留下孤儿引用,
         # 也导致模型里的 ondelete=CASCADE/SET NULL 在数据库层失效。先清孤儿,再补建约束。
@@ -244,6 +291,7 @@ def migrate():
             ("testcases", "reviewer_id", "users", "SET NULL"),
             ("testcases", "folder_id", "testcase_folders", "SET NULL"),
             ("testruns", "env_id", "test_environments", "SET NULL"),
+            ("projects", "template_id", "project_templates", "SET NULL"),
         ]
         for tbl, col, ref, rule in fk_repairs:
             try:
@@ -280,9 +328,75 @@ async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     migrate()
     seed_admin()
+    seed_dictionary()
+    seed_default_template()
     # 阶段到期提醒:启动补一次,之后按周期扫描(单进程部署,重复启动由当日去重兜底)
     start_stage_scheduler()
     yield
+
+
+def seed_dictionary():
+    """把内置字典默认项落库(全局行),已存在则跳过;读取侧对空表也有代码兜底"""
+    from .database import SessionLocal
+    from .dictionaries import seed_defaults
+
+    db = SessionLocal()
+    try:
+        added = seed_defaults(db)
+        db.commit()
+        if added:
+            print(f"[migrate] 数据字典默认项写入 {added} 条")
+    except Exception as e:  # 字典播种失败不应阻塞启动
+        db.rollback()
+        print(f"[migrate] 数据字典播种跳过: {e}")
+    finally:
+        db.close()
+
+
+def seed_default_template():
+    """内置一个「银行标准三阶段」模板:阶段天数 + 常用门禁,新项目可直接套用"""
+    import json
+
+    from sqlalchemy import select
+    from .database import SessionLocal
+    from .models import ProjectTemplate
+
+    db = SessionLocal()
+    try:
+        existing = db.execute(select(ProjectTemplate).order_by(ProjectTemplate.id)).scalars().all()
+        if existing:
+            # 默认模板被删后不留空档,否则新建项目失去默认套用来源
+            if not any(t.is_default for t in existing):
+                existing[0].is_default = True
+                db.commit()
+                print(f"[migrate] 已恢复默认项目模板「{existing[0].name}」")
+            return
+        db.add(ProjectTemplate(
+            name="银行标准三阶段模板",
+            description="SIT 10天/UAT 5天/PRE 2天;准出:执行率100%、通过率>=95%、未关闭紧急缺陷=0;准入:用例评审通过>=90%",
+            stage_days=json.dumps({"SIT": 10, "UAT": 5, "PRE": 2}, ensure_ascii=False),
+            gates=json.dumps([
+                {"stage": "SIT", "kind": "准出", "rule": "executed_rate_min", "threshold": 100, "enabled": True},
+                {"stage": "SIT", "kind": "准出", "rule": "pass_rate_min", "threshold": 95, "enabled": True},
+                {"stage": "SIT", "kind": "准出", "rule": "open_critical_defects_max", "threshold": 0, "enabled": True},
+                {"stage": "UAT", "kind": "准入", "rule": "review_approved_min", "threshold": 90, "enabled": True},
+            ], ensure_ascii=False),
+            custom_fields=json.dumps([
+                {"name": "测试设备", "field_type": "text", "required": False, "sort_order": 1},
+                {"name": "是否自动化覆盖", "field_type": "select", "options": ["是", "否"],
+                 "required": False, "sort_order": 2},
+            ], ensure_ascii=False),
+            tags=json.dumps([{"name": "冒烟", "color": "#E6A23C"}, {"name": "回归", "color": "#409EFF"}],
+                            ensure_ascii=False),
+            dict_items="", is_default=True,
+        ))
+        db.commit()
+        print("[migrate] 已创建默认项目模板「银行标准三阶段模板」")
+    except Exception as e:  # 模板播种失败不应阻塞启动
+        db.rollback()
+        print(f"[migrate] 默认模板播种跳过: {e}")
+    finally:
+        db.close()
 
 
 app = FastAPI(
@@ -324,6 +438,8 @@ app.include_router(integrations.router)
 app.include_router(todo.router)
 app.include_router(gates.router)
 app.include_router(environments.router)
+app.include_router(data_dict.router)
+app.include_router(templates.router)
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")

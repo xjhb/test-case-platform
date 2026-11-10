@@ -131,6 +131,14 @@ onBeforeUnmount(() => {
             <el-icon><Folder /></el-icon>
             <span>测试项目</span>
           </el-menu-item>
+          <el-menu-item index="/project-templates">
+            <el-icon><Files /></el-icon>
+            <span>项目模板</span>
+          </el-menu-item>
+          <el-menu-item index="/settings/dict">
+            <el-icon><Notebook /></el-icon>
+            <span>数据字典</span>
+          </el-menu-item>
           <el-menu-item index="/plans">
             <el-icon><Tickets /></el-icon>
             <span>项目批次</span>

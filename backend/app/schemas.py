@@ -111,6 +111,10 @@ class ProjectCreate(BaseModel):
     sa: str = ""
     is_key_project: bool = False
     is_started: bool = False
+    template_id: int | None = None  # 套用的项目模板,不传则用标记为默认的模板
+    default_sit_days: int | None = None  # 显式填写时覆盖模板/全局阶段天数
+    default_uat_days: int | None = None
+    default_pre_days: int | None = None
 
 
 class ProjectUpdate(BaseModel):
@@ -124,6 +128,10 @@ class ProjectUpdate(BaseModel):
     sa: str | None = None
     is_key_project: bool | None = None
     is_started: bool | None = None
+    default_sit_days: int | None = None
+    default_uat_days: int | None = None
+    default_pre_days: int | None = None
+    template_id: int | None = None  # 传 null 解除模板来源,被引用的模板才能删除
 
 
 class ProjectOut(BaseModel):
@@ -141,6 +149,10 @@ class ProjectOut(BaseModel):
     is_key_project: bool = False
     is_started: bool = False
     starred: bool = False
+    template_id: int | None = None
+    default_sit_days: int | None = None
+    default_uat_days: int | None = None
+    default_pre_days: int | None = None
 
 
 # ---------- 测试用例 ----------
@@ -353,7 +365,7 @@ class TeamMemberOut(BaseModel):
 class DefectCreate(BaseModel):
     title: str = Field(min_length=1, max_length=255)
     description: str = ""
-    severity: str = "中"  # 致命/严重/一般/提示
+    severity: str = "一般"  # 取值由数据字典 defect_severity 决定
     priority: str = "P1"
     testcase_id: int | None = None
     plan_id: int | None = None
@@ -740,5 +752,79 @@ class EnvOut(BaseModel):
     remark: str
     run_count: int = 0
     failed_count: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+
+# ===================== P2-3: 数据字典 =====================
+class DictItemCreate(BaseModel):
+    dict_key: str
+    project_id: int | None = None  # None 表示全局默认项,仅管理员可维护
+    label: str
+    color: str = ""
+    sort_order: int = 0
+    enabled: bool = True
+    is_urgent: bool = False
+    remark: str = ""
+
+
+class DictItemUpdate(BaseModel):
+    label: str | None = None
+    color: str | None = None
+    sort_order: int | None = None
+    enabled: bool | None = None
+    is_urgent: bool | None = None
+    remark: str | None = None
+
+
+class DictItemOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int | None = None
+    dict_key: str
+    project_id: int | None = None
+    label: str
+    color: str = ""
+    sort_order: int = 0
+    enabled: bool = True
+    is_urgent: bool = False
+    builtin: bool = False
+    remark: str = ""
+    source: str = "default"  # default / global / project
+
+
+# ===================== P2-3: 项目模板 =====================
+class TemplateCreate(BaseModel):
+    name: str
+    description: str = ""
+    stage_days: dict[str, int] | None = None
+    gates: list[dict] | None = None
+    custom_fields: list[dict] | None = None
+    tags: list[dict] | None = None
+    dict_items: list[dict] | None = None
+    is_default: bool = False
+
+
+class TemplateUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    stage_days: dict[str, int] | None = None
+    gates: list[dict] | None = None
+    custom_fields: list[dict] | None = None
+    tags: list[dict] | None = None
+    dict_items: list[dict] | None = None
+    is_default: bool | None = None
+
+
+class TemplateOut(BaseModel):
+    id: int
+    name: str
+    description: str
+    stage_days: dict[str, int] = {}
+    gates: list[dict] = []
+    custom_fields: list[dict] = []
+    tags: list[dict] = []
+    dict_items: list[dict] = []
+    is_default: bool
+    created_by: int | None = None
     created_at: datetime
     updated_at: datetime

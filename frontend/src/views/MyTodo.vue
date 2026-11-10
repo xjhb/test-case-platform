@@ -3,14 +3,17 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { todoApi } from '../api'
+import { useDict } from '../composables/useDict'
 
 const router = useRouter()
 const loading = ref(false)
 const data = ref(null)
 
-const severityTagType = (s) => ({ 致命: 'danger', 严重: 'danger', 一般: 'warning', 提示: 'info' }[s] || 'info')
+// 待办跨项目汇总,颜色取全局字典口径
+const dict = useDict(null)
+const severityTagType = (s) => dict.tagType('defect_severity', s)
 const defectStatusType = (s) => ({ 新建: 'info', 处理中: 'warning', 已修复: 'primary', 已验证: 'success', 关闭: '', 重新打开: 'danger' }[s] || 'info')
-const priorityType = (p) => ({ P0: 'danger', P1: 'warning', P2: 'primary', P3: 'info' }[p] || 'info')
+const priorityType = (p) => dict.tagType('case_priority', p)
 
 const groups = computed(() => {
   if (!data.value) return []

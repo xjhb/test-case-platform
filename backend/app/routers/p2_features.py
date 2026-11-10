@@ -182,8 +182,12 @@ def remove_project_role(
     ).scalar_one_or_none()
     if role:
         db.delete(role)
-        db.commit()
-        log_op(db, current, "删除", target=f"项目#{pid}角色", detail=f"用户#{user_id}")
+    # 成员关系要一并撤掉,否则只剩 ProjectRole 被删、用户仍可通过 user_projects 读项目
+    db.execute(user_projects.delete().where(
+        user_projects.c.user_id == user_id, user_projects.c.project_id == pid
+    ))
+    db.commit()
+    log_op(db, current, "删除", target=f"项目#{pid}角色", detail=f"用户#{user_id}")
     return {"ok": True}
 
 

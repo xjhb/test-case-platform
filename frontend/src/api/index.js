@@ -165,6 +165,27 @@ export const envApi = {
   runs: (id, params) => request.get(`/environments/${id}/runs`, { params }),
 }
 
+// ---- 数据字典 ----
+export const dictApi = {
+  types: () => request.get('/dict/types'),
+  options: (params) => request.get('/dict/options', { params }),
+  effective: (params) => request.get('/dict/effective', { params }),
+  list: (params) => request.get('/dict', { params }),
+  create: (data) => request.post('/dict', data),
+  update: (id, data) => request.put(`/dict/${id}`, data),
+  remove: (id) => request.delete(`/dict/${id}`),
+}
+
+// ---- 项目模板 ----
+export const templateApi = {
+  list: () => request.get('/project-templates'),
+  create: (data) => request.post('/project-templates', data),
+  update: (id, data) => request.put(`/project-templates/${id}`, data),
+  remove: (id) => request.delete(`/project-templates/${id}`),
+  apply: (id, projectId) => request.post(`/project-templates/${id}/apply`, null, { params: { project_id: projectId } }),
+  collect: (projectId) => request.get(`/project-templates/collect/${projectId}`),
+}
+
 // ---- 缺陷管理 ----
 export const defectApi = {
   list: (params) => request.get('/defects', { params }),

@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..deps import accessible_project_ids, get_current_user, require_project_access
+from ..dictionaries import top_label
 from ..models import Project, TestCase, TestPlan, TestRun, User
 from ..scope import has_scope, plan_case_ids
 
@@ -114,6 +115,8 @@ def dashboard(
         cases = [c for c in cases if c.id in plan_scope]
         total_cases = len(cases)
         scope_cases = total_cases
+        # 「最高优先级」由数据字典的排序决定,不写死 P0
+        top_priority = top_label(db, "case_priority", target_plan.project_id) or "P0"
 
         for st in STAGE_ORDER:
             latest = _latest_runs(db, pid, st)
@@ -134,10 +137,10 @@ def dashboard(
             exec_rate = round(executed / total_cases * 100, 1) if total_cases else 0
             level, level_desc = _health_level(pass_rate)
 
-            # 严重缺陷占比 = P0失败数 / P0用例数
-            p0_cases = [c for c in cases if c.priority == "P0"]
-            p0_failed = sum(1 for c in p0_cases if latest.get(c.id) and latest[c.id].status == "失败")
-            p0_ratio = round(p0_failed / len(p0_cases) * 100, 1) if p0_cases else 0
+            # 严重缺陷占比 = 最高优先级失败数 / 最高优先级用例数
+            top_cases = [c for c in cases if c.priority == top_priority]
+            top_failed = sum(1 for c in top_cases if latest.get(c.id) and latest[c.id].status == "失败")
+            p0_ratio = round(top_failed / len(top_cases) * 100, 1) if top_cases else 0
 
             quality_stages.append({
                 "stage": st,
@@ -161,9 +164,9 @@ def dashboard(
         execution_progress = round(executed_count / len(cases) * 100, 1) if cases else 0
 
         # 严重缺陷占比(总览)
-        p0_all = [c for c in cases if c.priority == "P0"]
-        p0_fail_all = sum(1 for c in p0_all if focus_latest.get(c.id) and focus_latest[c.id].status == "失败")
-        severe_defect_ratio = round(p0_fail_all / len(p0_all) * 100, 1) if p0_all else 0
+        top_all = [c for c in cases if c.priority == top_priority]
+        top_fail_all = sum(1 for c in top_all if focus_latest.get(c.id) and focus_latest[c.id].status == "失败")
+        severe_defect_ratio = round(top_fail_all / len(top_all) * 100, 1) if top_all else 0
 
         # 每日执行趋势(近7天)
         seven_days_ago = datetime.now() - timedelta(days=6)

@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..database import get_db
+from ..dictionaries import normalize
 from ..deps import get_current_user, require_admin, require_project_access
 from ..integrations import cicd, issue_sync, notify, probe
 from ..integrations.errors import IntegrationError, NotConfigured
@@ -288,7 +289,7 @@ def _handle_issue_created(payload: WebhookPayload, db: Session, current: Optiona
         assignee_name = fields.get("assignedTo", "") or fields.get("assigned_to", "")
     desc = fields.get("description") or fields.get("steps") or ""
     severity_raw = fields.get("severity") or fields.get("priority") or ""
-    severity = severity_raw if severity_raw in {"致命", "严重", "中", "一般", "提示"} else "一般"
+    severity = normalize(db, "defect_severity", severity_raw, project.id, preferred="一般")
     status = _map_status(fields.get("status") if not isinstance(fields.get("status"), dict) else (fields.get("status") or {}).get("name"))
 
     if link and link.defect_id:
@@ -427,7 +428,7 @@ def sync_defect(
         )
     ).scalars().first()
 
-    severity = req.severity if req.severity in {"致命", "严重", "中", "一般", "提示"} else "一般"
+    severity = normalize(db, "defect_severity", req.severity, req.project_id, preferred="一般")
     status = _map_status(req.status)
     assignee_id = _resolve_user(req.assignee, db)
 

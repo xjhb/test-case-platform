@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
+from ..dictionaries import check_400
 from ..deps import accessible_project_ids, get_current_user, require_project_access
 from ..logger import log_op
 from ..models import Defect, ProjectRole, TestCase, TestCaseStep, TestCaseVersion, TestPlan, TestRun, User
@@ -18,8 +19,6 @@ from ..notify import emit
 from ..schemas import TestCaseCreate, TestCaseOut, TestCaseStepIn, TestCaseStepOut, TestCaseUpdate
 
 router = APIRouter(prefix="/api/testcases", tags=["测试用例"], dependencies=[Depends(get_current_user)])
-
-VALID_PRIORITY = {"P0", "P1", "P2", "P3"}
 
 
 class ReviewSubmit(BaseModel):
@@ -307,9 +306,8 @@ def list_testcases(
 
 @router.post("", response_model=TestCaseOut)
 def create_testcase(payload: TestCaseCreate, db: Session = Depends(get_db), current: User = Depends(get_current_user)):
-    if payload.priority not in VALID_PRIORITY:
-        raise HTTPException(status_code=400, detail="优先级只能是 P0/P1/P2/P3")
     require_project_access(payload.project_id, db, current)
+    check_400(db, "case_priority", payload.priority, payload.project_id)
     tc = TestCase(
         project_id=payload.project_id,
         module=payload.module,
@@ -346,8 +344,8 @@ def update_testcase(tcid: int, payload: TestCaseUpdate, db: Session = Depends(ge
         raise HTTPException(status_code=404, detail="用例不存在")
     require_project_access(tc.project_id, db, current)
     data = payload.model_dump(exclude_unset=True)
-    if "priority" in data and data["priority"] not in VALID_PRIORITY:
-        raise HTTPException(status_code=400, detail="优先级只能是 P0/P1/P2/P3")
+    if "priority" in data:
+        check_400(db, "case_priority", data["priority"], tc.project_id, current=tc.priority)
     for k, v in data.items():
         setattr(tc, k, v)
     _save_version(db, tc, current, "编辑保存")

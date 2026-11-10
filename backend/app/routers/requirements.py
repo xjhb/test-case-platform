@@ -3,6 +3,7 @@ from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
 from ..database import get_db
+from ..dictionaries import check_400
 from ..deps import accessible_project_ids, get_current_user, require_project_access
 from ..logger import log_op
 from ..models import Defect, Requirement, TestCase, TestRun, User, requirement_testcases
@@ -141,6 +142,8 @@ def create_requirement(
     current: User = Depends(get_current_user),
 ):
     require_project_access(payload.project_id, db, current)
+    if payload.priority:
+        check_400(db, "requirement_priority", payload.priority, payload.project_id)
     req = Requirement(
         project_id=payload.project_id,
         req_no=payload.req_no,
@@ -188,6 +191,8 @@ def update_requirement(
         raise HTTPException(status_code=404, detail="需求不存在")
     require_project_access(req.project_id, db, current)
     data = payload.model_dump(exclude_unset=True)
+    if data.get("priority"):
+        check_400(db, "requirement_priority", data["priority"], req.project_id, current=req.priority)
     for k, v in data.items():
         setattr(req, k, v)
     db.commit()

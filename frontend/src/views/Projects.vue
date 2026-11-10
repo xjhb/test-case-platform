@@ -2,7 +2,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { projectApi, p2Api, userApi } from '../api'
+import { projectApi, p2Api, userApi, templateApi } from '../api'
 
 const router = useRouter()
 const list = ref([])
@@ -10,11 +10,13 @@ const loading = ref(false)
 const dialogVisible = ref(false)
 const isEdit = ref(false)
 const formRef = ref()
+const templates = ref([])
 
 const form = reactive({
   id: null, name: '', description: '', project_no: '', level: '',
   project_type: '', test_manager: '', tech_manager: '', sa: '',
   is_key_project: false, is_started: false,
+  template_id: null, default_sit_days: null, default_uat_days: null, default_pre_days: null,
 })
 
 const rules = { name: [{ required: true, message: '请输入项目名称', trigger: 'blur' }] }
@@ -24,19 +26,45 @@ async function load() {
   try { list.value = await projectApi.list() } finally { loading.value = false }
 }
 
+async function loadTemplates() {
+  try { templates.value = await templateApi.list() } catch (e) { templates.value = [] }
+}
+
 function resetForm() {
   form.id = null; form.name = ''; form.description = ''; form.project_no = ''
   form.level = ''; form.project_type = ''; form.test_manager = ''
   form.tech_manager = ''; form.sa = ''; form.is_key_project = false; form.is_started = false
+  form.template_id = null
+  form.default_sit_days = null; form.default_uat_days = null; form.default_pre_days = null
 }
 
 function openCreate() {
-  isEdit.value = false; resetForm(); dialogVisible.value = true
+  isEdit.value = false; resetForm()
+  const fallback = templates.value.find((t) => t.is_default)
+  form.template_id = fallback ? fallback.id : 0
+  applyTemplateDays(form.template_id)
+  dialogVisible.value = true
+}
+
+function applyTemplateDays(templateId) {
+  // 天数值留空即跟随模板/全局,这里只做预览,方便看到模板会带进来什么
+  const tpl = templates.value.find((t) => t.id === templateId)
+  const days = tpl?.stage_days || {}
+  form.default_sit_days = days.SIT ?? null
+  form.default_uat_days = days.UAT ?? null
+  form.default_pre_days = days.PRE ?? null
+}
+
+function onTemplateChange(val) {
+  if (!isEdit.value) {
+    applyTemplateDays(val)
+  }
 }
 
 function openEdit(row) {
   isEdit.value = true
   Object.assign(form, row)
+  form.template_id = row.template_id || 0
   dialogVisible.value = true
 }
 
@@ -163,7 +191,10 @@ function roleTagType(r) {
   return { manager: 'danger', test_lead: 'warning', tester: 'primary', viewer: 'info' }[r] || 'info'
 }
 
-onMounted(load)
+onMounted(async () => {
+  await load()
+  await loadTemplates()
+})
 </script>
 
 <template>
@@ -216,6 +247,41 @@ onMounted(load)
         <el-row :gutter="12">
           <el-col :span="12"><el-form-item label="项目名称" prop="name"><el-input v-model="form.name" /></el-form-item></el-col>
           <el-col :span="12"><el-form-item label="项目编号"><el-input v-model="form.project_no" /></el-form-item></el-col>
+        </el-row>
+        <el-row :gutter="12">
+          <el-col :span="12">
+            <el-form-item label="项目模板">
+              <el-select v-model="form.template_id" placeholder="请选择" style="width:100%"
+                         @change="onTemplateChange">
+                <el-option label="不套用" :value="0" />
+                <el-option v-for="t in templates" :key="t.id" :label="t.name + (t.is_default ? '(默认)' : '')" :value="t.id" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="SIT 天数">
+              <el-input-number v-model="form.default_sit_days" :min="1" :max="365" :value-on-clear="null" placeholder="跟随模板" style="width:100%" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <el-row :gutter="12" v-if="form.template_id">
+          <el-col :span="24">
+            <div style="color:#909399;font-size:12px;margin:-6px 0 8px 90px">
+              {{ isEdit ? '编辑时改这里只记录来源,不会重新套用配置;需要套用请到「项目模板」页。' : '创建时自动套用该模板的门禁、字段、标签与字典项;阶段天数可在此调整。' }}
+            </div>
+          </el-col>
+        </el-row>
+        <el-row :gutter="12">
+          <el-col :span="12">
+            <el-form-item label="UAT 天数">
+              <el-input-number v-model="form.default_uat_days" :min="1" :max="365" :value-on-clear="null" placeholder="跟随模板" style="width:100%" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="预发版天数">
+              <el-input-number v-model="form.default_pre_days" :min="1" :max="365" :value-on-clear="null" placeholder="跟随模板" style="width:100%" />
+            </el-form-item>
+          </el-col>
         </el-row>
         <el-row :gutter="12">
           <el-col :span="8"><el-form-item label="项目等级"><el-select v-model="form.level" style="width:100%"><el-option label="A" value="A" /><el-option label="B" value="B" /><el-option label="C" value="C" /></el-select></el-form-item></el-col>

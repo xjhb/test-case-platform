@@ -59,18 +59,26 @@ def _parse(dt_str: str | None) -> datetime | None:
     return None
 
 
-def _get_stage_defaults(db: Session) -> dict:
+def _get_stage_defaults(db: Session, project: Project | None = None) -> dict:
     cfg = db.execute(select(SystemConfig).limit(1)).scalar_one_or_none()
-    return {
+    fallback = {
         "sit": cfg.default_sit_days if cfg else 7,
         "uat": cfg.default_uat_days if cfg else 5,
         "pre": cfg.default_pre_days if cfg else 3,
+    }
+    if not project:
+        return fallback
+    # 项目级天数优先(模板套用或项目设置写入),未设置则回退全局配置
+    return {
+        "sit": project.default_sit_days or fallback["sit"],
+        "uat": project.default_uat_days or fallback["uat"],
+        "pre": project.default_pre_days or fallback["pre"],
     }
 
 
 def _auto_set_stage_times(plan: TestPlan, db: Session):
     """根据默认天数自动设置三阶段时间"""
-    defaults = _get_stage_defaults(db)
+    defaults = _get_stage_defaults(db, db.get(Project, plan.project_id))
     now = datetime.now()
     plan.sit_start = now
     plan.sit_end = now + timedelta(days=defaults["sit"])

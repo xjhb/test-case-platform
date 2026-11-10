@@ -30,7 +30,11 @@
           <el-tag :type="severityTagType(row.severity)" size="small">{{ row.severity }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="priority" label="优先级" width="80" />
+      <el-table-column label="优先级" width="90">
+        <template #default="{ row }">
+          <el-tag :type="priorityTagType(row.priority)" size="small" effect="plain">{{ row.priority }}</el-tag>
+        </template>
+      </el-table-column>
       <el-table-column prop="status" label="状态" width="100">
         <template #default="{ row }">
           <el-tag :type="statusTagType(row.status)" size="small">{{ row.status }}</el-tag>
@@ -223,11 +227,12 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { defectApi, integrationApi, projectApi, userApi, testcaseApi } from '../api'
 import { useAuthStore } from '../stores/auth'
+import { useDict } from '../composables/useDict'
 
 const route = useRoute()
 const defects = ref([])
@@ -243,9 +248,8 @@ const total = ref(0)
 const auth = useAuthStore()
 const role = computed(() => auth.role)
 
+// 缺陷状态是状态机口径,固定;严重程度/优先级走数据字典
 const statusOptions = ['新建', '处理中', '已修复', '已验证', '关闭', '重新打开']
-const severityOptions = ['致命', '严重', '一般', '提示']
-const priorityOptions = ['P0', 'P1', 'P2', 'P3']
 
 const filters = reactive({
   project_id: null,
@@ -267,6 +271,20 @@ const form = reactive({
 })
 
 const testcaseOptions = ref([])
+
+// ---- 数据字典驱动的枚举 ----
+// 弹窗里按所选项目的字典取选项;列表筛选跟随筛选项目;都没选时用全局口径
+const dictProjectId = computed(() => (dialogVisible.value ? form.project_id : null) || filters.project_id || null)
+const dict = useDict(dictProjectId)
+const severityOptions = computed(() => dict.labels('defect_severity'))
+const priorityOptions = computed(() => dict.labels('defect_priority'))
+
+// 切换项目后原来的默认值可能被停用或改名,退回字典里的可用值
+watch([severityOptions, priorityOptions], ([sevs, prs]) => {
+  if (!dialogVisible.value) return
+  if (sevs.length && !sevs.includes(form.severity)) form.severity = dict.pick('defect_severity', '一般')
+  if (prs.length && !prs.includes(form.priority)) form.priority = dict.pick('defect_priority', 'P1')
+})
 
 // ---- 状态机 ----
 const statusTransitions = ref({})
@@ -307,10 +325,8 @@ const loadProjectTestcases = async (pid) => {
   } catch (e) { console.error(e) }
 }
 
-const severityTagType = (s) => {
-  const map = { '致命': 'danger', '严重': 'warning', '一般': 'info', '提示': 'success' }
-  return map[s] || 'info'
-}
+const severityTagType = (s) => dict.tagType('defect_severity', s)
+const priorityTagType = (p) => dict.tagType('defect_priority', p)
 
 const statusTagType = (s) => {
   const map = { '新建': 'danger', '处理中': 'warning', '已修复': 'success', '已验证': 'success', '关闭': 'info', '重新打开': 'danger' }
@@ -356,7 +372,12 @@ const loadUsers = async () => {
 const showCreateDialog = () => {
   isEdit.value = false
   originalStatus.value = ''
-  Object.assign(form, { title: '', description: '', severity: '一般', priority: 'P1', project_id: null, testcase_id: null, assignee_id: null, status: '新建' })
+  Object.assign(form, {
+    title: '', description: '',
+    severity: dict.pick('defect_severity', '一般'),
+    priority: dict.pick('defect_priority', 'P1'),
+    project_id: null, testcase_id: null, assignee_id: null, status: '新建',
+  })
   testcaseOptions.value = []
   dialogVisible.value = true
 }

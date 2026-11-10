@@ -46,6 +46,18 @@ const routes = [
         meta: { title: '阶段门禁' },
       },
       {
+        path: 'project-templates',
+        name: 'project-templates',
+        component: () => import('../views/ProjectTemplates.vue'),
+        meta: { title: '项目模板' },
+      },
+      {
+        path: 'settings/dict',
+        name: 'settings-dict',
+        component: () => import('../views/DictSettings.vue'),
+        meta: { title: '数据字典' },
+      },
+      {
         path: 'calendar',
         name: 'calendar',
         component: () => import('../views/Calendar.vue'),
