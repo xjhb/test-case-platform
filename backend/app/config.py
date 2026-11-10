@@ -50,6 +50,8 @@ class Settings(BaseSettings):
 
     # 外部系统回调的共享密钥(X-Webhook-Token);为空则回调只接受平台登录令牌
     webhook_secret: str = ""
+    # 操作日志哈希链的盐;为空则复用 secret_key(轮换 secret_key 会让历史链校验失败)
+    audit_secret: str = ""
     # 本平台对外地址,用于通知里的跳转链接
     platform_base_url: str = ""
     # 关闭后站内信照写,不再调用邮件/群机器人等外部通道

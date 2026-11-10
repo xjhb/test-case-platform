@@ -281,6 +281,22 @@ def migrate():
                 conn.execute(text(f"ALTER TABLE projects {ddl}"))
         # 历史缺陷严重程度默认值曾写为「中」,与校验集合(致命/严重/一般/提示)不一致
         conn.execute(text("ALTER TABLE defects ALTER COLUMN severity SET DEFAULT '一般'"))
+        # ===================== P2-4: 操作日志防篡改哈希链 =====================
+        for col, ddl in [
+            ("prev_hash", "ADD COLUMN prev_hash VARCHAR(64) DEFAULT ''"),
+            ("row_hash", "ADD COLUMN row_hash VARCHAR(64) DEFAULT ''"),
+        ]:
+            if not conn.execute(text(f"SHOW COLUMNS FROM operation_logs LIKE '{col}'")).fetchone():
+                conn.execute(text(f"ALTER TABLE operation_logs {ddl}"))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS audit_chain_state (
+                id INT PRIMARY KEY,
+                last_log_id INT DEFAULT 0,
+                head_hash VARCHAR(64) DEFAULT '',
+                log_count INT DEFAULT 0,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            )
+        """))
         # ===================== 补齐 ALTER 加列时遗漏的外键约束 =====================
         # 上面用 ALTER TABLE ADD COLUMN 补的列没有 FK,历史上删除父行会留下孤儿引用,
         # 也导致模型里的 ondelete=CASCADE/SET NULL 在数据库层失效。先清孤儿,再补建约束。
@@ -320,6 +336,14 @@ def migrate():
             except Exception as e:  # 约束补建失败不应阻塞启动
                 print(f"[migrate] 外键 {tbl}.{col} 补建跳过: {e}")
         conn.commit()
+
+    # 历史日志补哈希:只能保证补写之后的可验证性
+    from . import audit
+    from .database import SessionLocal
+    with SessionLocal() as s:
+        n = audit.backfill(s)
+    if n:
+        print(f"[migrate] 已为 {n} 条历史操作日志补写防篡改哈希链")
 
 
 @asynccontextmanager

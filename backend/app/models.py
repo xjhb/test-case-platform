@@ -209,6 +209,21 @@ class OperationLog(Base):
     detail: Mapped[str] = mapped_column(Text, default="")
     ip: Mapped[str] = mapped_column(String(64), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), index=True)
+    # 防篡改哈希链:见 app/audit.py
+    prev_hash: Mapped[str] = mapped_column(String(64), default="")
+    row_hash: Mapped[str] = mapped_column(String(64), default="", index=True)
+
+
+class AuditChainState(Base):
+    """链头单行表:记录最后一条日志的哈希,写入时靠它的行锁串行化并发的日志追加。"""
+
+    __tablename__ = "audit_chain_state"
+
+    id: Mapped[int] = mapped_column(primary_key=True)  # 恒为 1
+    last_log_id: Mapped[int] = mapped_column(default=0)
+    head_hash: Mapped[str] = mapped_column(String(64), default="")
+    log_count: Mapped[int] = mapped_column(default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
 class SystemConfig(Base):

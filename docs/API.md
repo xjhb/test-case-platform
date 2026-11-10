@@ -414,8 +414,58 @@
 
 | 方法 | 路径 | 说明 | 权限 |
 |------|------|------|------|
-| GET | `` | 日志列表(分页/筛选) | Admin |
+| GET | `` | 日志列表(分页/筛选),每条附带 `row_hash`/`prev_hash` | Admin |
 | GET | `/actions` | 操作类型列表 | Admin |
+| GET | `/integrity` | 只读校验哈希链完整性,支持 `from_id`/`to_id` 分段 | Admin |
+| POST | `/integrity/verify` | 同上,但这次校验本身写入日志(`action=校验`) | Admin |
+| GET | `/state` | 链头概况:已入链条数、末条 id、链头哈希、盐来源 | Admin |
+| GET | `/anchor?date=YYYY-MM-DD` | 按自然日聚合的锚定哈希,用于对外存证 | Admin |
+
+### 防篡改机制
+
+每条日志写入时计算 `row_hash = SHA-256(盐 + prev_hash + 本条内容)`,前一条的哈希存在 `prev_hash`,
+串成一条链;链头(最后一条的哈希)单独记在 `audit_chain_state` 单行表,并靠它的行锁串行化并发写入,
+保证并发场景不会裂链。参与哈希的字段是 `id / username / action / target / detail / ip / created_at`;
+不含 `user_id`——删除用户时外键会把历史日志的 `user_id` 置空,那是正常级联,不算篡改。
+
+盐取自配置 `AUDIT_SECRET`,留空时回退复用 `SECRET_KEY`(`/state` 与 `/integrity` 的 `salt_source` 会说明用的是哪个);
+只拿到数据库写权限的人不知道盐,无法整链重算,所以生产环境应单独配置并长期保留该密钥,
+轮换 `SECRET_KEY` 会让历史链校验失败。
+
+历史数据在启动迁移时自动回填哈希,只能保证回填之后的可验证性:回填前已被删改的记录无从追溯。
+平台不提供日志的修改与删除接口,日志只能增长。
+
+### 校验响应
+
+```json
+GET /api/logs/integrity?from_id=100&to_id=2000
+{
+  "checked": 1901, "ok": false, "from_id": 100, "to_id": 2000,
+  "head_hash": "de529339…", "log_count": 1944, "truncated": false,
+  "salt_source": "secret_key",
+  "issues": [
+    { "id": 137, "kind": "内容被篡改", "reason": "按当前字段重算的哈希与存储值不一致,内容或时间被改过" },
+    { "id": 240, "kind": "链断裂", "reason": "前序哈希对不上:该位置之前的记录被删除、插入或重排" },
+    { "id": 28990, "kind": "未入链", "reason": "该行还没有哈希,无法证明未被改动" },
+    { "id": 28973, "kind": "链头不符", "reason": "链头记录的最后哈希与末条日志不一致:末尾记录被删改,或写入时没更新链头" }
+  ]
+}
+```
+
+`ok=true` 表示逐条重算全部通过。异常明细最多返回 50 条(`truncated=true` 说明被截断);
+`from_id` 起点之前的记录不在本次结论内,但会自动接上它的前序哈希,所以分段校验也能给出可信结论。
+
+### 锚定值
+
+```json
+GET /api/logs/anchor?date=2026-11-10
+{ "date": "2026-11-10", "count": 283, "first_id": 1692, "last_id": 28974,
+  "anchor": "a1b2c3…(64 位)" }
+```
+
+把当日所有日志的 `row_hash` 依次串接后再取一次 SHA-256,得到一个与条数、顺序、内容都绑定的单值,
+适合抄录到工单/周报/第三方存证;次日比对同一个值即可确认当天日志未被改动。
+日期格式非法或该日不存在(如 `2026-02-30`)返回 400。
 
 ---
 

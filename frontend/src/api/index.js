@@ -280,6 +280,10 @@ export const systemApi = {
 export const logApi = {
   list: (params) => request.get('/logs', { params }),
   actions: () => request.get('/logs/actions'),
+  integrity: (params) => request.get('/logs/integrity', { params }),
+  verify: (params) => request.post('/logs/integrity/verify', null, { params }),
+  state: () => request.get('/logs/state'),
+  anchor: (date) => request.get('/logs/anchor', { params: { date } }),
 }
 
 // ---- 驾驶舱统计 ----

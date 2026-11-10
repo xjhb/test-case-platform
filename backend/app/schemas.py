@@ -314,6 +314,8 @@ class OperationLogOut(BaseModel):
     detail: str
     ip: str
     created_at: datetime
+    row_hash: str = ""   # 本条日志的链上哈希,截断展示即可
+    prev_hash: str = ""  # 前一条的哈希,对不上说明链被动过
 
 
 # ---------- 团队 ----------
